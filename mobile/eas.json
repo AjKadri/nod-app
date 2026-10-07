@@ -1,0 +1,9 @@
+{
+  "build": {
+    "dapp-store": {
+      "android": {
+        "buildType": "apk"
+      }
+    }
+  }
+}

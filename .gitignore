@@ -1,0 +1,9 @@
+node_modules/
+sim/.test-wallet.json
+mobile/dist/
+mobile/.expo/
+phone-test-logs/
+.mock-mwa-wallet/
+.jdk/
+apks/
+.DS_Store

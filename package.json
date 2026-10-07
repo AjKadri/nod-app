@@ -1,0 +1,27 @@
+{
+  "name": "nod",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nod: your AI agent asks, your phone approves, your mobile wallet signs.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "relay": "node relay/server.js",
+    "phone:sim": "node sim/phone.js",
+    "local-rpc": "node sim/local-rpc.js",
+    "demo": "node sim/demo.js",
+    "sync": "node scripts/sync-shared.js",
+    "test": "node scripts/sync-shared.js --check && node --test --test-timeout=30000 test/loop.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "litesvm": "0.8.0"
+  }
+}

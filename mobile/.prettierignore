@@ -1,0 +1,14 @@
+# Add files here to ignore them from prettier formatting
+/.expo
+/android
+/coverage
+/dist
+/ios
+/tmp
+pnpm-lock.yaml
+.agents
+agent
+pnpm-workspace.yaml
+
+# Synced from ../shared by `npm run sync`. Do not edit or reformat here.
+features/approvals/lib

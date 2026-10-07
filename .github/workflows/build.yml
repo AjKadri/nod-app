@@ -1,0 +1,80 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Laptop-side tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  app:
+    name: Nod APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install
+      - name: Build release APK (arm64)
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+      - name: Verify signature
+        run: |
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+          ls -la android/app/build/outputs/apk/release/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nod-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  wallet:
+    name: Mock MWA Wallet APK (testing only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: solana-mobile/mock-mwa-wallet
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - run: ./gradlew assembleDebug --no-daemon
+      - run: find app/build/outputs/apk -name "*.apk" -exec ls -la {} \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mock-wallet-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
