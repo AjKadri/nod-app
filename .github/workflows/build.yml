@@ -78,3 +78,29 @@ jobs:
           name: mock-wallet-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  publish:
+    name: Publish APKs to the build-artifacts branch
+    needs: [app, wallet]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+      - name: Push APKs to an orphan branch (replaced on every build)
+        run: |
+          mkdir out
+          cp downloaded/nod-apk/app-release.apk out/nod.apk
+          cp "$(ls downloaded/mock-wallet-apk/*.apk | head -1)" out/mock-wallet.apk
+          cd out
+          sha256sum *.apk > SHA256SUMS
+          echo "Built from ${GITHUB_SHA} by run ${GITHUB_RUN_ID}" > BUILD.txt
+          ls -la
+          git init -q -b build-artifacts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "APKs for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" build-artifacts
