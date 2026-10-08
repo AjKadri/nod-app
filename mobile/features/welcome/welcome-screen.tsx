@@ -6,11 +6,13 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { Label, NodButton, Wordmark } from '@/components/ui'
 import { space } from '@/constants/theme'
+import { useApprovals } from '@/features/approvals/approvals-provider'
 
 /** First screen: connect a wallet. Pairing with a laptop by QR arrives with the pairing work. */
 export function WelcomeScreen() {
   const { tokens } = useTheme()
   const { connect } = useMobileWallet()
+  const { setDemo } = useApprovals()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -45,6 +47,12 @@ export function WelcomeScreen() {
           accessibilityHint="Opens your Solana wallet to link it with Nod"
         />
         <NodButton title="Pair with laptop · coming soon" variant="secondary" disabled onPress={() => {}} />
+        <NodButton
+          title="Try demo"
+          variant="ghost"
+          onPress={() => setDemo(true)}
+          accessibilityHint="Shows sample requests. No wallet needed and nothing is sent"
+        />
       </View>
     </SafeAreaView>
   )

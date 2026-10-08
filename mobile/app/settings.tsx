@@ -60,7 +60,11 @@ export default function SettingsScreen() {
             <Switch
               accessibilityLabel="Demo mode"
               value={demo}
-              onValueChange={setDemo}
+              onValueChange={(on) => {
+                setDemo(on)
+                // Without a wallet, leaving demo goes back to Welcome.
+                if (!on && !account) router.replace('/' as Href)
+              }}
               trackColor={{ false: tokens.line, true: tokens.accent }}
               thumbColor={tokens.onAccent}
             />
