@@ -23,13 +23,16 @@ type Item = {
  * in ./lib, which is the same code the laptop tests run.
  */
 export function ApprovalsFeatureIndex() {
-  const { account, connection, signAndSendTransaction, signTransaction } = useMobileWallet()
+  const { account, connection, connect, signAndSendTransaction, signTransaction } = useMobileWallet()
   const address = account?.address.toString()
   const chain = useMemo(() => rpcChain(connection), [connection])
   const relayRef = useRef<RelayClient | null>(null)
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('offline')
   const [items, setItems] = useState<Item[]>([])
   const [history, setHistory] = useState<string[]>([])
+  // Who broadcasts an approved transaction. Default: Nod (the wallet only signs),
+  // because some wallets (the Mock MWA Wallet among them) fail to send on devnet.
+  const [walletSends, setWalletSends] = useState(false)
 
   useEffect(() => {
     if (!address) return
@@ -93,12 +96,23 @@ export function ApprovalsFeatureIndex() {
       previous.map((other) => (other.request.id === item.request.id ? { ...other, phase: 'working' } : other)),
     )
 
-    const signAndSend: SignAndSend = async (transaction, minContextSlot) => {
-      if (ApprovalsConfig.signOnly) {
+    const sendOnce: SignAndSend = async (transaction, minContextSlot) => {
+      if (!walletSends) {
         const signed = await signTransaction(transaction)
         return chain.sendRaw(signed.serialize())
       }
       return signAndSendTransaction(transaction, minContextSlot)
+    }
+    // A wallet login that has gone stale fails with "authorization request failed".
+    // Log in to the wallet again once, then retry.
+    const signAndSend: SignAndSend = async (transaction, minContextSlot) => {
+      try {
+        return await sendOnce(transaction, minContextSlot)
+      } catch (error) {
+        if (!/authoriz/i.test(String((error as Error)?.message ?? error))) throw error
+        await connect()
+        return sendOnce(transaction, minContextSlot)
+      }
     }
 
     const outcome = await submitApproval({ request: item.request, walletAddress: address, chain, signAndSend, relay })
@@ -128,6 +142,10 @@ export function ApprovalsFeatureIndex() {
         {relayStatus === 'replaced' ? (
           <Text>Another phone took over this relay. Reconnect the wallet to take it back.</Text>
         ) : null}
+        <Button
+          title={walletSends ? 'Sending: wallet sends (tap to switch)' : 'Sending: Nod sends (tap to switch)'}
+          onPress={() => setWalletSends((value) => !value)}
+        />
         {!address ? <Text>Connect a wallet above to receive approval requests.</Text> : null}
         {address && !current ? <Text>Waiting for an agent to ask...</Text> : null}
       </View>
