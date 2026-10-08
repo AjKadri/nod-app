@@ -12,8 +12,10 @@ export class ApprovalsConfig {
   static relayUrl = process.env.EXPO_PUBLIC_RELAY_URL ?? 'http://localhost:8787'
   static relayToken = process.env.EXPO_PUBLIC_RELAY_TOKEN ?? ''
   /**
-   * Feasibility Test 2 fallback: if the wallet signs but fails to send, set
-   * EXPO_PUBLIC_SIGN_ONLY=1 to have the wallet only sign and the app broadcast.
+   * Who broadcasts an approved transaction. Default: Nod (the wallet only signs),
+   * because some wallets (the Mock MWA Wallet among them) fail to send on devnet.
+   * Set EXPO_PUBLIC_WALLET_SENDS=1 to let the wallet sign and send instead.
+   * There is no switch for this on screen.
    */
-  static signOnly = process.env.EXPO_PUBLIC_SIGN_ONLY === '1'
+  static walletSends = process.env.EXPO_PUBLIC_WALLET_SENDS === '1'
 }

@@ -1,18 +1,20 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PropsWithChildren } from 'react'
-import { NetworkProvider } from '@/features/network/network-provider'
 import { MobileWalletProvider } from '@wallet-ui/react-native-web3js'
-import { useNetwork } from '@/features/network/use-network'
+import { ThemeProvider } from '@/components/theme-provider'
 import { AppConfig } from '@/constants/app-config'
+import { ApprovalsProvider } from '@/features/approvals/approvals-provider'
+import { NetworkProvider } from '@/features/network/network-provider'
+import { useNetwork } from '@/features/network/use-network'
 
-const queryClient = new QueryClient()
 export function AppProviders({ children }: PropsWithChildren) {
   return (
-    <QueryClientProvider client={queryClient}>
+    <ThemeProvider>
       <NetworkProvider>
-        <SolanaNetworkProvider>{children}</SolanaNetworkProvider>
+        <SolanaNetworkProvider>
+          <ApprovalsProvider>{children}</ApprovalsProvider>
+        </SolanaNetworkProvider>
       </NetworkProvider>
-    </QueryClientProvider>
+    </ThemeProvider>
   )
 }
 

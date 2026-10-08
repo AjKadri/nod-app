@@ -72,7 +72,7 @@ In another terminal, from this folder: `npm run relay`.
 4. **Test 5.** Compare the app's "You send ..." line with the wallet's balance change on the explorer.
 5. **Test 7.** `eas build --platform android --profile dapp-store`, then `apksigner verify --print-certs`, `adb install`, and repeat Test 3. Back up the keystore EAS creates.
 
-If the wallet signs but fails to send (the Test 2 fallback), start the app with `EXPO_PUBLIC_SIGN_ONLY=1 npm run android`: the wallet then only signs and the app broadcasts.
+If the wallet signs but fails to send (the Test 2 fallback), start the app with `EXPO_PUBLIC_WALLET_SENDS=1 npm run android`: the wallet then signs and sends (Nod broadcasts by default).
 
 If the phone cannot reach the relay: check `adb reverse --list`, and `curl http://localhost:8787/health` on the laptop.
 
