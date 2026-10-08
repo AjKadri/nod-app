@@ -26,6 +26,7 @@ const {
 } = require("@solana/web3.js");
 
 const { createRelay } = require("../relay/server");
+const { pairForTesting } = require("../agent/pairing");
 const { createLocalRpc } = require("../sim/local-rpc");
 const { createSimPhone } = require("../sim/phone");
 const { requestApproval, buildRawTransfer, getWalletAddress } = require("../agent/client");
@@ -45,11 +46,13 @@ let rpc;
 let rpcUrl;
 let relay;
 let relayUrl;
+let agentToken;
+let phoneToken;
 let connection;
 const openPhones = new Set();
 
 /** Start a simulated phone with 1 SOL. `decide` is the "human". */
-function startPhone({ decide = async () => "approve", fund = LAMPORTS_PER_SOL, token = "", relayOverride } = {}) {
+function startPhone({ decide = async () => "approve", fund = LAMPORTS_PER_SOL, token, relayOverride } = {}) {
   const keypair = Keypair.generate();
   if (fund > 0) rpc.airdrop(keypair.publicKey, fund);
   const events = [];
@@ -57,7 +60,7 @@ function startPhone({ decide = async () => "approve", fund = LAMPORTS_PER_SOL, t
     relayUrl: relayOverride || relayUrl,
     rpcUrl,
     keypair,
-    token,
+    token: token ?? phoneToken,
     decide,
     onEvent: (event) => events.push({ ...event, at: Date.now() }),
   });
@@ -79,6 +82,9 @@ async function phoneOnline(base = relayUrl) {
   await waitFor(async () => (await (await fetch(`${base}/health`)).json()).phones > 0, { label: "phone online" });
 }
 
+const agentHeaders = () => ({ "content-type": "application/json", authorization: `Bearer ${agentToken}` });
+const phoneHeaders = () => ({ "content-type": "application/json", authorization: `Bearer ${phoneToken}` });
+
 function newAddress() {
   return Keypair.generate().publicKey.toBase58();
 }
@@ -88,6 +94,7 @@ before(async () => {
   rpcUrl = (await rpc.listen()).url;
   relay = createRelay({ port: 0 });
   relayUrl = (await relay.listen()).url;
+  ({ agentToken, phoneToken } = await pairForTesting({ relay: relayUrl }));
   connection = new Connection(rpcUrl, "confirmed");
 });
 
@@ -113,7 +120,7 @@ test("Test 3: agent asks, phone approves, agent gets a confirmed signature", asy
 
   const sentAt = Date.now();
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "transfer", to, lamports, note: "from laptop agent" },
   });
 
@@ -135,7 +142,7 @@ test("Test 3: phone denies, agent is told, nothing moves", async () => {
   const to = newAddress();
 
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "transfer", to, lamports: 1_000_000 },
   });
 
@@ -147,7 +154,7 @@ test("Test 3: phone denies, agent is told, nothing moves", async () => {
 
 test("a request sent while the phone is offline is delivered when it connects", async () => {
   const to = newAddress();
-  const pending = requestApproval({ relay: relayUrl, payload: { type: "transfer", to, lamports: 2_000_000 } });
+  const pending = requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "transfer", to, lamports: 2_000_000 } });
   await waitFor(async () => (await (await fetch(`${relayUrl}/health`)).json()).pending === 1, { label: "request queued" });
 
   const { phone } = startPhone();
@@ -174,7 +181,7 @@ test("Test 4: a pre-built transaction with an expired blockhash still goes throu
   assert.equal(rpc.balance(to), 0);
 
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "raw", transactionBase64: built.transactionBase64 },
   });
 
@@ -195,7 +202,7 @@ test("Test 4: a slow human (blockhash expires while the request is on screen) st
   const built = await buildRawTransfer({ rpc: rpcUrl, from: phone.address, to, lamports: 4_000_000 });
 
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "raw", transactionBase64: built.transactionBase64 },
   });
 
@@ -234,7 +241,7 @@ test("known limit: a multi-signer transaction cannot be refreshed", async () => 
   // Approved in time: works, and the co-signer's signature is preserved.
   const to1 = Keypair.generate().publicKey;
   const fast = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "raw", transactionBase64: await buildTwoSigner(to1) },
   });
   assert.equal(fast.status, "approved");
@@ -245,7 +252,7 @@ test("known limit: a multi-signer transaction cannot be refreshed", async () => 
   expireBeforeApproving = true;
   const to2 = Keypair.generate().publicKey;
   const slow = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "raw", transactionBase64: await buildTwoSigner(to2) },
   });
   assert.equal(slow.status, "failed");
@@ -268,7 +275,7 @@ test("Test 5: the preview shown before signing matches what actually leaves the 
   const lamports = 1_000_000;
   const before = rpc.balance(keypair.publicKey);
 
-  const outcome = await requestApproval({ relay: relayUrl, payload: { type: "transfer", to, lamports } });
+  const outcome = await requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "transfer", to, lamports } });
   assert.equal(outcome.status, "approved");
 
   const actualChange = rpc.balance(keypair.publicKey) - before;
@@ -294,7 +301,7 @@ test("the preview shows what the transaction really does, not what the agent's n
   const built = await buildRawTransfer({ rpc: rpcUrl, from: phone.address, to: attacker, lamports: 900_000_000 });
 
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "raw", transactionBase64: built.transactionBase64, note: "tiny 0.001 SOL test payment" },
   });
 
@@ -317,7 +324,7 @@ test("a transaction that would fail is flagged in the preview and fails cleanly 
   const to = newAddress();
 
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "transfer", to, lamports: 2 * LAMPORTS_PER_SOL },
   });
 
@@ -350,7 +357,7 @@ test("a transaction built for a different wallet is refused before the human is 
   });
 
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "raw", transactionBase64: built.transactionBase64 },
   });
 
@@ -364,20 +371,20 @@ test("garbage from the agent is refused, and the phone keeps working afterwards"
   await phoneOnline();
 
   const junk = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "raw", transactionBase64: Buffer.from("not a transaction").toString("base64") },
   });
   assert.equal(junk.status, "failed");
 
   const badAddress = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "transfer", to: "definitely-not-an-address", lamports: 1000 },
   });
   assert.equal(badAddress.status, "failed");
   assert.match(badAddress.result.reason, /valid Solana address/);
 
   const to = newAddress();
-  const good = await requestApproval({ relay: relayUrl, payload: { type: "transfer", to, lamports: 1_000_000 } });
+  const good = await requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "transfer", to, lamports: 1_000_000 } });
   assert.equal(good.status, "approved");
 });
 
@@ -443,14 +450,14 @@ test("relay: a request can only be answered once", async () => {
   const created = await (
     await fetch(`${relayUrl}/requests`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: agentHeaders(),
       body: JSON.stringify({ type: "transfer", to: newAddress(), lamports: 1 }),
     })
   ).json();
   const answer = (body) =>
     fetch(`${relayUrl}/requests/${created.id}/result`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: phoneHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -458,15 +465,17 @@ test("relay: a request can only be answered once", async () => {
   assert.equal((await answer({ status: "maybe" })).status, 400);
   assert.equal((await answer({ status: "denied" })).status, 200);
   assert.equal((await answer({ status: "approved", signature: "abc" })).status, 409, "cannot flip a denial");
-  const final = await (await fetch(`${relayUrl}/requests/${created.id}`)).json();
+  const final = await (await fetch(`${relayUrl}/requests/${created.id}`, { headers: agentHeaders() })).json();
   assert.equal(final.status, "denied");
 });
 
 test("relay: unanswered requests expire and the agent is told", async () => {
   const quick = createRelay({ port: 0, requestTtlMs: 150 });
   const { url } = await quick.listen();
+  const quickPair = await pairForTesting({ relay: url });
   const outcome = await requestApproval({
     relay: url,
+    token: quickPair.agentToken,
     payload: { type: "transfer", to: newAddress(), lamports: 1 },
   });
   assert.equal(outcome.status, "expired");
@@ -475,12 +484,12 @@ test("relay: unanswered requests expire and the agent is told", async () => {
 
 test("relay: when the agent gives up, the request is withdrawn", async () => {
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "transfer", to: newAddress(), lamports: 1 },
     timeoutMs: 300,
   });
   assert.equal(outcome.status, "timeout");
-  const stored = await (await fetch(`${relayUrl}/requests/${outcome.id}`)).json();
+  const stored = await (await fetch(`${relayUrl}/requests/${outcome.id}`, { headers: agentHeaders() })).json();
   assert.equal(stored.status, "cancelled");
   assert.equal((await (await fetch(`${relayUrl}/health`)).json()).pending, 0);
 });
@@ -498,7 +507,7 @@ test("if the agent gives up while the human is still deciding, the phone signs n
   const to = newAddress();
 
   const outcome = await requestApproval({
-    relay: relayUrl,
+    relay: relayUrl, token: agentToken,
     payload: { type: "transfer", to, lamports: 1_000_000 },
     timeoutMs: 300,
   });
@@ -511,33 +520,6 @@ test("if the agent gives up while the human is still deciding, the phone signs n
   assert.equal(rpc.balance(keypair.publicKey), LAMPORTS_PER_SOL);
 });
 
-test("relay: with a token set, strangers are locked out and the owner still works", async () => {
-  const locked = createRelay({ port: 0, token: "s3cret-token" });
-  const { url } = await locked.listen();
-  const body = JSON.stringify({ type: "transfer", to: newAddress(), lamports: 1_000_000 });
-  const headers = { "content-type": "application/json" };
-
-  assert.equal((await fetch(`${url}/requests`, { method: "POST", headers, body })).status, 401);
-  assert.equal((await fetch(`${url}/wallet`)).status, 401);
-  assert.equal(
-    (await fetch(`${url}/requests`, { method: "POST", headers: { ...headers, authorization: "Bearer wrong" }, body })).status,
-    401
-  );
-  await assert.rejects(requestApproval({ relay: url, payload: JSON.parse(body) }), /401/);
-
-  const { phone } = startPhone({ token: "s3cret-token", relayOverride: url });
-  await phoneOnline(url);
-  const to = newAddress();
-  const outcome = await requestApproval({
-    relay: url,
-    token: "s3cret-token",
-    payload: { type: "transfer", to, lamports: 1_000_000 },
-  });
-  assert.equal(outcome.status, "approved");
-  assert.equal(await getWalletAddress({ relay: url, token: "s3cret-token" }), phone.address);
-  await locked.close();
-});
-
 test("relay: only one phone is live at a time, so a request can never be signed twice", async () => {
   const first = startPhone();
   await phoneOnline();
@@ -547,7 +529,7 @@ test("relay: only one phone is live at a time, so a request can never be signed 
   });
   const to = newAddress();
 
-  const outcome = await requestApproval({ relay: relayUrl, payload: { type: "transfer", to, lamports: 1_000_000 } });
+  const outcome = await requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "transfer", to, lamports: 1_000_000 } });
 
   assert.equal(outcome.status, "approved");
   assert.equal(rpc.balance(to), 1_000_000, "the money moved once, not twice");
@@ -557,7 +539,7 @@ test("relay: only one phone is live at a time, so a request can never be signed 
 
 test("relay: rejects unknown request types and oversized bodies", async () => {
   const post = (body) =>
-    fetch(`${relayUrl}/requests`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    fetch(`${relayUrl}/requests`, { method: "POST", headers: agentHeaders(), body });
   assert.equal((await post(JSON.stringify({ type: "drain-everything" }))).status, 400);
   assert.equal((await post("{not json")).status, 400);
   assert.equal((await post(JSON.stringify({ type: "raw", transactionBase64: "A".repeat(20_000) }))).status, 413);
@@ -576,9 +558,11 @@ test("relay: fires a push notification when a request arrives", async () => {
   await new Promise((resolve) => fakeExpo.listen(0, "127.0.0.1", resolve));
   const pushy = createRelay({ port: 0, expoPushUrl: `http://127.0.0.1:${fakeExpo.address().port}/send` });
   const { url } = await pushy.listen();
-  const headers = { "content-type": "application/json" };
+  const pushPair = await pairForTesting({ relay: url });
+  const phoneSide = { "content-type": "application/json", authorization: `Bearer ${pushPair.phoneToken}` };
+  const headers = { "content-type": "application/json", authorization: `Bearer ${pushPair.agentToken}` };
 
-  await fetch(`${url}/push-token`, { method: "POST", headers, body: JSON.stringify({ token: "ExponentPushToken[test]" }) });
+  await fetch(`${url}/push-token`, { method: "POST", headers: phoneSide, body: JSON.stringify({ token: "ExponentPushToken[test]" }) });
   const created = await (
     await fetch(`${url}/requests`, {
       method: "POST",
@@ -616,7 +600,13 @@ test("Test 8: a real MCP client can ask the phone through the MCP server", async
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(ROOT, "agent/mcp-server.js")],
-      env: { ...process.env, RELAY_URL: relayUrl, AGENT_NAME: "claude-code", APPROVAL_TIMEOUT_SECONDS: "20" },
+      env: {
+        ...process.env,
+        RELAY_URL: relayUrl,
+        RELAY_TOKEN: agentToken,
+        AGENT_NAME: "claude-code",
+        APPROVAL_TIMEOUT_SECONDS: "20",
+      },
     })
   );
 
@@ -657,7 +647,7 @@ test("Test 8: a real MCP client can ask the phone through the MCP server", async
 function runCli(args, env = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(ROOT, "agent/request.js"), ...args], {
-      env: { ...process.env, ...env },
+      env: { ...process.env, RELAY_TOKEN: agentToken, ...env },
     });
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));

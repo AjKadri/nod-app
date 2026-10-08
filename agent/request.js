@@ -12,9 +12,10 @@
  * sending, which makes the blockhash stale on purpose (feasibility Test 4).
  *
  * Options: --relay URL  --rpc URL  --note TEXT  --timeout SECONDS  --hold SECONDS
- * Env:     RELAY_URL, RELAY_TOKEN, RPC_URL
+ * Env:     RELAY_URL, RELAY_TOKEN, RPC_URL. Without them the pairing saved by agent/pair.js is used.
  */
 const { getWalletAddress, requestApproval, buildRawTransfer } = require("./client");
+const { resolveAgentConnection } = require("./credentials");
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -40,9 +41,8 @@ function fail(message) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const mode = args._[0];
-  const relay = (args.relay || process.env.RELAY_URL || "http://localhost:8787").replace(/\/+$/, "");
+  const { relay, token } = resolveAgentConnection({ relayArg: typeof args.relay === "string" ? args.relay : undefined });
   const rpc = args.rpc || process.env.RPC_URL || "https://api.devnet.solana.com";
-  const token = process.env.RELAY_TOKEN || "";
   const timeoutMs = Number(args.timeout || 300) * 1000;
 
   if (mode !== "transfer" && mode !== "raw") {

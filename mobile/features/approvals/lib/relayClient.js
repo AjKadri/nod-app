@@ -5,18 +5,20 @@
  *
  *   const client = createRelayClient({
  *     baseUrl: "http://localhost:8787",
+ *     token: "<pairing id>.<phone key>",   // from claimPairing()
  *     WebSocketImpl: WebSocket,   // global in React Native; `ws` package in Node
  *     fetchImpl: fetch,
  *     onRequest: (request) => ...,     // a new approval request arrived
  *     onResolved: (id, status) => ..., // a request was answered or expired
- *     onStatus: (status) => ...,       // "connecting" | "online" | "offline" | "replaced"
+ *     onStatus: (status) => ...,       // "connecting" | "online" | "offline" | "replaced" | "revoked"
  *   });
  *   client.setWallet(address);
  *   await client.sendResult(id, { status: "approved", signature });
  */
 
-// The relay closes a phone's socket with this code when a newer phone connects.
-const REPLACED_CODE = 4000;
+// The relay closes a phone's socket with these codes.
+const REPLACED_CODE = 4000; // a newer phone connected to the same pairing
+const REVOKED_CODE = 4001; // the pairing was revoked
 
 function toWsUrl(baseUrl) {
   return baseUrl.replace(/^http/i, "ws").replace(/\/+$/, "") + "/phone";
@@ -58,8 +60,13 @@ function createRelayClient({
   function connect() {
     if (closed) return;
     onStatus("connecting");
-    const url = toWsUrl(httpBase) + (token ? `?token=${encodeURIComponent(token)}` : "");
-    const ws = new WebSocketImpl(url);
+    // The key goes in a header, never in the URL, so it stays out of access logs.
+    // React Native and the `ws` package both accept headers as the third argument.
+    const ws = new WebSocketImpl(
+      toWsUrl(httpBase),
+      undefined,
+      token ? { headers: { authorization: `Bearer ${token}` } } : undefined,
+    );
     socket = ws;
 
     ws.onopen = () => {
@@ -93,7 +100,13 @@ function createRelayClient({
         onStatus("replaced");
         return;
       }
+      if (event && event.code === REVOKED_CODE) {
+        closed = true;
+        onStatus("revoked");
+        return;
+      }
       onStatus("offline");
+      checkStillPaired();
       retryTimer = setTimeout(connect, reconnectMs);
     };
   }
@@ -102,6 +115,21 @@ function createRelayClient({
     const base = { "content-type": "application/json" };
     if (token) base.authorization = `Bearer ${token}`;
     return base;
+  }
+
+  // A socket that cannot connect may mean the pairing was revoked while we were
+  // offline. Ask the relay: a 401 means the keys are gone, so stop trying.
+  function checkStillPaired() {
+    if (!token) return;
+    Promise.resolve(fetchImpl(`${httpBase}/pairing`, { headers: headers() }))
+      .then((response) => {
+        if (response && response.status === 401 && !closed) {
+          closed = true;
+          if (retryTimer) clearTimeout(retryTimer);
+          onStatus("revoked");
+        }
+      })
+      .catch(() => {});
   }
 
   connect();

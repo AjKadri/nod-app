@@ -28,7 +28,8 @@ async function readJson(response) {
     body = { error: text };
   }
   if (!response.ok) {
-    throw new Error(`Relay error ${response.status}: ${body.error || text}`);
+    const hint = response.status === 401 ? ' Pair this laptop with your phone first: node agent/pair.js' : "";
+    throw new Error(`Relay error ${response.status}: ${body.error || text}.${hint}`.replace("..", "."));
   }
   return body;
 }

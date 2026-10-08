@@ -6,12 +6,15 @@
  * mobile wallet. Use it to run the whole loop on a laptop before touching
  * Android.
  *
+ *   node sim/phone.js --pair "nod://pair?..."   pair with a laptop first (once), using the link
+ *                                          `node agent/pair.js` prints. Then:
  *   node sim/phone.js                      asks y/n for each request
  *   node sim/phone.js --auto approve       approves everything
  *   node sim/phone.js --auto deny
  *   node sim/phone.js --airdrop            ask the RPC for 1 test SOL first
  *
- * Options: --relay URL  --rpc URL   Env: RELAY_URL, RELAY_TOKEN, RPC_URL
+ * Options: --pair LINK  --rpc URL   Env: RPC_URL
+ * The pairing is kept in sim/.test-pairing.json (test only).
  *
  * The test key is saved in sim/.test-wallet.json. It is for devnet or the
  * local stand-in only. Never send real funds to it.
@@ -24,6 +27,7 @@ const { Connection, Keypair, LAMPORTS_PER_SOL } = require("@solana/web3.js");
 const { reviewRequest, formatSol } = require("../shared/approval");
 const { rpcChain } = require("../shared/chain");
 const { createRelayClient } = require("../shared/relayClient");
+const { claimPairing } = require("../shared/pairing");
 const { submitApproval, submitDenial, submitInvalid } = require("../shared/flow");
 
 /**
@@ -124,7 +128,24 @@ async function main() {
     const index = args.indexOf(`--${name}`);
     return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
   };
-  const relayUrl = value("relay", process.env.RELAY_URL || "http://localhost:8787");
+  const pairFile = path.join(__dirname, ".test-pairing.json");
+  let pairing = null;
+  try {
+    pairing = JSON.parse(fs.readFileSync(pairFile, "utf8"));
+  } catch (_err) {
+    // Not paired yet.
+  }
+  const link = value("pair", "");
+  if (link) {
+    pairing = await claimPairing({ link, fetchImpl: fetch });
+    fs.writeFileSync(pairFile, JSON.stringify(pairing), { mode: 0o600 });
+    console.log(`[phone] paired with "${pairing.label}"`);
+  }
+  if (!pairing) {
+    console.error('Not paired. Run `node agent/pair.js`, then: node sim/phone.js --pair "<the nod://pair link>"');
+    process.exit(1);
+  }
+  const relayUrl = pairing.relay;
   const rpcUrl = value("rpc", process.env.RPC_URL || "https://api.devnet.solana.com");
   const auto = value("auto", "");
   const keypair = loadOrCreateKeypair(path.join(__dirname, ".test-wallet.json"));
@@ -135,7 +156,7 @@ async function main() {
     relayUrl,
     rpcUrl,
     keypair,
-    token: process.env.RELAY_TOKEN || "",
+    token: pairing.token,
     decide: async (review, request) => {
       printReview(review, request);
       if (auto === "approve" || auto === "deny") {

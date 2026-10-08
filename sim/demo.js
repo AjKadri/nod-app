@@ -12,6 +12,7 @@ const { createRelay } = require("../relay/server");
 const { createLocalRpc } = require("./local-rpc");
 const { createSimPhone } = require("./phone");
 const { requestApproval, buildRawTransfer } = require("../agent/client");
+const { pairForTesting } = require("../agent/pairing");
 const { formatSol } = require("../shared/approval");
 
 async function main() {
@@ -19,6 +20,7 @@ async function main() {
   const rpcUrl = (await rpc.listen()).url;
   const relay = createRelay({ port: 0 });
   const relayUrl = (await relay.listen()).url;
+  const { agentToken, phoneToken } = await pairForTesting({ relay: relayUrl });
 
   const wallet = Keypair.generate();
   rpc.airdrop(wallet.publicKey, LAMPORTS_PER_SOL);
@@ -26,6 +28,7 @@ async function main() {
   let beforeDeciding = () => {};
   const phone = createSimPhone({
     relayUrl,
+    token: phoneToken,
     rpcUrl,
     keypair: wallet,
     decide: async (review) => {
@@ -48,12 +51,12 @@ async function main() {
   console.log(`\nPhone wallet ${phone.address} starts with ${formatSol(rpc.balance(wallet.publicKey))}\n`);
 
   console.log("1. Agent asks to send 0.001 SOL. Human approves.");
-  show(await requestApproval({ relay: relayUrl, payload: { type: "transfer", to: someone(), lamports: 1_000_000, note: "pay for the API call" } }));
+  show(await requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "transfer", to: someone(), lamports: 1_000_000, note: "pay for the API call" } }));
   balance();
 
   console.log("2. Agent asks again. Human denies.");
   humanSays = "deny";
-  show(await requestApproval({ relay: relayUrl, payload: { type: "transfer", to: someone(), lamports: 1_000_000 } }));
+  show(await requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "transfer", to: someone(), lamports: 1_000_000 } }));
   balance();
 
   console.log("3. Agent sends a finished transaction. The human is slow and its blockhash expires first.");
@@ -63,14 +66,14 @@ async function main() {
     console.log("   ...time passes, the agent's blockhash is now expired...");
   };
   const slow = await buildRawTransfer({ rpc: rpcUrl, from: phone.address, to: someone(), lamports: 2_000_000 });
-  show(await requestApproval({ relay: relayUrl, payload: { type: "raw", transactionBase64: slow.transactionBase64 } }));
+  show(await requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "raw", transactionBase64: slow.transactionBase64 } }));
   balance();
 
   console.log('4. A tricked agent says "tiny test payment" but its transaction sends 0.9 SOL.');
   humanSays = "deny";
   beforeDeciding = () => {};
   const trick = await buildRawTransfer({ rpc: rpcUrl, from: phone.address, to: someone(), lamports: 900_000_000 });
-  show(await requestApproval({ relay: relayUrl, payload: { type: "raw", transactionBase64: trick.transactionBase64, note: "tiny 0.001 SOL test payment" } }));
+  show(await requestApproval({ relay: relayUrl, token: agentToken, payload: { type: "raw", transactionBase64: trick.transactionBase64, note: "tiny 0.001 SOL test payment" } }));
   balance();
 
   phone.close();

@@ -7,3 +7,5 @@ phone-test-logs/
 .jdk/
 apks/
 .DS_Store
+sim/.test-pairing.json
+.relay-pairings.json

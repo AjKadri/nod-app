@@ -1,4 +1,4 @@
-export type RelayStatus = 'connecting' | 'online' | 'offline' | 'replaced'
+export type RelayStatus = 'connecting' | 'online' | 'offline' | 'replaced' | 'revoked'
 
 export type RelayRequest = {
   id: string

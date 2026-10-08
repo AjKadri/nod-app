@@ -9,7 +9,8 @@
  *   request_transfer     ask the phone to send SOL
  *   request_transaction  ask the phone to sign and send a transaction the agent built
  *
- * Env: RELAY_URL (default http://localhost:8787), RELAY_TOKEN, AGENT_NAME, APPROVAL_TIMEOUT_SECONDS
+ * Setup: run `node agent/pair.js` once. The pairing it saves is used automatically.
+ * Env (optional): RELAY_URL, RELAY_TOKEN, AGENT_NAME, APPROVAL_TIMEOUT_SECONDS
  *
  * Example client config:
  *   { "mcpServers": { "phone-approvals": { "command": "node",
@@ -20,9 +21,10 @@ const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
 const { getWalletAddress, requestApproval } = require("./client");
+const { resolveAgentConnection } = require("./credentials");
 
-const relay = (process.env.RELAY_URL || "http://localhost:8787").replace(/\/+$/, "");
-const token = process.env.RELAY_TOKEN || "";
+// RELAY_URL / RELAY_TOKEN, or else the pairing saved by `node agent/pair.js`.
+const { relay, token } = resolveAgentConnection();
 const agentName = (process.env.AGENT_NAME || "mcp-agent").slice(0, 60);
 const timeoutMs = Number(process.env.APPROVAL_TIMEOUT_SECONDS || 300) * 1000;
 
