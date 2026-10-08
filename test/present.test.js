@@ -134,3 +134,18 @@ test("risky is true for red warnings only: mismatch, failed preview, unknown pro
   // Other signers is an amber warning: still a normal approval.
   assert.equal(presentReview(review({ refreshable: false })).risky, false);
 });
+
+test("demo mode sample data covers every state and uses the real presenter", () => {
+  const { demoRequests, demoHistory } = require("../shared/demo");
+  const [normal, risky] = demoRequests();
+  assert.equal(normal.presented.amount, "0.002005");
+  assert.equal(normal.presented.risky, false);
+  assert.equal(risky.note, "tiny 0.001 SOL test payment");
+  assert.equal(risky.presented.amount, "0.030005");
+  assert.equal(risky.presented.risky, true);
+  assert.equal(risky.presented.mismatch.message, "The agent said 0.001 SOL. This sends 0.030005 SOL.");
+  assert.deepEqual(demoHistory().map((h) => h.status), ["approved", "rejected", "failed"]);
+  assert.ok(demoHistory().find((h) => h.status === "failed").reason);
+  const ids = [...demoRequests(), ...demoHistory()].map((x) => x.id);
+  assert.equal(new Set(ids).size, ids.length);
+});

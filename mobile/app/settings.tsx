@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useMobileWallet } from '@wallet-ui/react-native-web3js'
 import { useRouter, type Href } from 'expo-router'
 import React from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { DetailRow, Eyebrow, Label, NodButton } from '@/components/ui'
@@ -30,7 +30,7 @@ export default function SettingsScreen() {
   const router = useRouter()
   const { account, disconnect } = useMobileWallet()
   const { networks, selectedNetwork, setSelectedNetwork } = useNetwork()
-  const { relayStatus } = useApprovals()
+  const { relayStatus, demo, setDemo } = useApprovals()
 
   const relayHost = ApprovalsConfig.relayUrl.replace(/^https?:\/\//, '')
 
@@ -51,6 +51,22 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        <Section title="Demo">
+          <View style={styles.switchRow}>
+            <View style={styles.switchText}>
+              <Text style={{ color: tokens.text, fontSize: 16 }}>Demo mode</Text>
+              <Label>Sample requests that never touch your wallet or the relay.</Label>
+            </View>
+            <Switch
+              accessibilityLabel="Demo mode"
+              value={demo}
+              onValueChange={setDemo}
+              trackColor={{ false: tokens.line, true: tokens.accent }}
+              thumbColor={tokens.onAccent}
+            />
+          </View>
+        </Section>
+
         <Section title="Wallet">
           <DetailRow
             label="Connected"
@@ -157,6 +173,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 4,
   },
+  switchRow: { alignItems: 'center', flexDirection: 'row', gap: 16, paddingVertical: 12 },
+  switchText: { flex: 1, gap: 2 },
   inline: { alignSelf: 'flex-start', paddingHorizontal: 0 },
   help: { paddingBottom: 12 },
   segmented: { borderRadius: radius.panel, flexDirection: 'row', margin: 8, padding: 4 },

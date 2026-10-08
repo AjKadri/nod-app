@@ -62,6 +62,16 @@ export function NetworkPill({ label }: { label: string }) {
   )
 }
 
+/** Shown while demo mode is on, so nobody mistakes sample data for real requests. */
+export function DemoPill() {
+  const { tokens } = useTheme()
+  return (
+    <View accessibilityLabel="Demo mode is on" style={[styles.pill, { borderColor: tokens.warn }]}>
+      <Text style={{ color: tokens.warn, fontSize: size.small, fontWeight: '600' }}>Demo</Text>
+    </View>
+  )
+}
+
 type ButtonProps = {
   title: string
   onPress: () => void

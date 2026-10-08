@@ -6,7 +6,7 @@ import { StyleSheet, Text, View } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { DetailRow, IconCircle, Label, NodButton } from '@/components/ui'
+import { DemoPill, DetailRow, IconCircle, Label, NodButton } from '@/components/ui'
 import { radius, space } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
 import { useNetwork } from '@/features/network/use-network'
@@ -50,7 +50,13 @@ export default function ResultScreen() {
   const meta = COPY[entry.status]
   const color =
     entry.status === 'approved' ? tokens.accentText : entry.status === 'rejected' ? tokens.danger : tokens.warn
-  const note = entry.status === 'failed' ? entry.reason || 'Something went wrong.' : meta.note
+  const note = entry.demo
+    ? entry.status === 'failed'
+      ? entry.reason || 'Something went wrong.'
+      : 'Demo only: no wallet was opened and nothing was sent.'
+    : entry.status === 'failed'
+      ? entry.reason || 'Something went wrong.'
+      : meta.note
   const explorerUrl = entry.signature ? getExplorerUrl(`tx/${entry.signature}`) : null
 
   async function copySignature() {
@@ -86,6 +92,13 @@ export default function ResultScreen() {
         ) : null}
         {entry.signature ? <DetailRow label="Signature" value={shorten(entry.signature, 6)} monospace last /> : null}
       </View>
+
+      {entry.demo ? (
+        <View style={styles.demoRow}>
+          <DemoPill />
+          <Label>Sample data from demo mode</Label>
+        </View>
+      ) : null}
 
       {!entry.reported ? (
         <Text style={{ color: tokens.warn, fontSize: 14 }}>
@@ -124,4 +137,5 @@ const styles = StyleSheet.create({
   actions: { gap: 12 },
   pair: { flexDirection: 'row', gap: 12 },
   half: { flex: 1 },
+  demoRow: { alignItems: 'center', flexDirection: 'row', gap: 10, justifyContent: 'center' },
 })

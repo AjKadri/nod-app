@@ -4,12 +4,12 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import Animated, { SlideInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { DetailRow, Eyebrow, Label, NodButton, useNow, Wordmark } from '@/components/ui'
+import { DemoPill, DetailRow, Eyebrow, Label, NodButton, useNow, Wordmark } from '@/components/ui'
 import { radius, size, space } from '@/constants/theme'
 import { useNetwork } from '@/features/network/use-network'
 import { formatSol } from './lib/approval'
 import type { Presented } from './lib/present'
-import type { Item } from './approvals-provider'
+import { useApprovals, type Item } from './approvals-provider'
 import { shorten, timeAgo } from '@/utils/format'
 
 /**
@@ -29,6 +29,7 @@ export function ApprovalCard({
   const { tokens } = useTheme()
   const { selectedNetwork } = useNetwork()
   const now = useNow()
+  const { demo } = useApprovals()
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const { presented, phase } = item
@@ -62,7 +63,10 @@ export function ApprovalCard({
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <View style={styles.headerRow}>
             <Wordmark />
-            <Label>Solana · {selectedNetwork.label}</Label>
+            <View style={styles.headerRight}>
+              {demo ? <DemoPill /> : null}
+              <Label>Solana · {selectedNetwork.label}</Label>
+            </View>
           </View>
 
           <View style={styles.agentRow}>
@@ -272,6 +276,7 @@ const styles = StyleSheet.create({
   },
   scroll: { gap: 20, padding: space.screen },
   headerRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  headerRight: { alignItems: 'center', flexDirection: 'row', gap: 10 },
   agentRow: { alignItems: 'center', flexDirection: 'row', gap: 14 },
   agentText: { flex: 1 },
   checking: { alignItems: 'center', flexDirection: 'row', gap: 12, paddingVertical: 24 },

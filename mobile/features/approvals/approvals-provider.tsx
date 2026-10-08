@@ -12,6 +12,7 @@ import React, {
   useState,
 } from 'react'
 import { ApprovalsConfig } from '@/constants/approvals-config'
+import { buildDemo } from './demo-data'
 import { reviewRequest, type Review, type SignAndSend } from './lib/approval'
 import { rpcChain } from './lib/chain'
 import { submitApproval, submitDenial, submitInvalid, type Outcome } from './lib/flow'
@@ -40,6 +41,8 @@ export type HistoryEntry = {
   /** False when the relay could not be told, so the agent may still be waiting. */
   reported: boolean
   at: number
+  /** Sample data from demo mode: nothing was signed, sent or reported. */
+  demo?: boolean
 }
 
 type ApprovalsValue = {
@@ -53,6 +56,9 @@ type ApprovalsValue = {
   reject: (id: string) => Promise<void>
   /** Take the relay back after another phone replaced this one. */
   reconnectRelay: () => void
+  /** Demo mode: sample requests that never touch the wallet or the relay. */
+  demo: boolean
+  setDemo: (on: boolean) => void
 }
 
 const HISTORY_KEY = 'nod.history.v1'
@@ -65,6 +71,8 @@ const ApprovalsContext = createContext<ApprovalsValue>({
   approve: async () => {},
   reject: async () => {},
   reconnectRelay: () => {},
+  demo: false,
+  setDemo: () => {},
 })
 
 function haptic(run: () => Promise<void>) {
@@ -111,6 +119,15 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [reconnectKey, setReconnectKey] = useState(0)
+  // Demo mode keeps its own items and history. Nothing in it reaches the wallet or the relay.
+  const [demo, setDemoState] = useState(false)
+  const demoRef = useRef(false)
+  const [demoItems, setDemoItems] = useState<Item[]>([])
+  const [demoHistory, setDemoHistory] = useState<HistoryEntry[]>([])
+  const demoItemsRef = useRef<Item[]>([])
+  useEffect(() => {
+    demoItemsRef.current = demoItems
+  }, [demoItems])
 
   // Keep a ref in step with state so callbacks always see the latest items.
   const setItems = useCallback((update: (previous: Item[]) => Item[]) => {
@@ -208,8 +225,51 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
     [setItems],
   )
 
+  const setDemo = useCallback((on: boolean) => {
+    demoRef.current = on
+    setDemoState(on)
+    const seed = on ? buildDemo(Date.now()) : { items: [], history: [] }
+    setDemoItems(seed.items)
+    setDemoHistory(seed.history)
+  }, [])
+
+  const finishDemo = useCallback((item: Item, outcome: Outcome) => {
+    setDemoItems((previous) => previous.filter((other) => other.request.id !== item.request.id))
+    setDemoHistory((previous) => [{ ...entryFor(item, outcome), demo: true }, ...previous])
+    haptic(() =>
+      outcome.status === 'approved'
+        ? Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        : Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium),
+    )
+  }, [])
+
+  // Pretend to open the wallet for a moment, then finish. No wallet call, no relay call.
+  const approveDemo = useCallback(
+    (id: string) => {
+      const item = demoItemsRef.current.find((other) => other.request.id === id)
+      if (!item || item.phase !== 'ready') return
+      setDemoItems((previous) => previous.map((o) => (o.request.id === id ? { ...o, phase: 'working' } : o)))
+      setTimeout(() => {
+        const still = demoItemsRef.current.find((other) => other.request.id === id)
+        if (!demoRef.current || still?.phase !== 'working') return
+        finishDemo(item, { status: 'approved', reported: true })
+      }, 1200)
+    },
+    [finishDemo],
+  )
+
+  const rejectDemo = useCallback(
+    (id: string) => {
+      const item = demoItemsRef.current.find((other) => other.request.id === id)
+      if (!item || item.phase === 'working') return
+      finishDemo(item, { status: 'denied', reason: 'Rejected in demo mode', reported: true })
+    },
+    [finishDemo],
+  )
+
   const approve = useCallback(
     async (id: string) => {
+      if (demoRef.current) return approveDemo(id)
       const relay = relayRef.current
       const item = itemsRef.current.find((other) => other.request.id === id)
       if (!relay || !address || !item || item.phase !== 'ready') return
@@ -238,11 +298,12 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       const outcome = await submitApproval({ request: item.request, walletAddress: address, chain, signAndSend, relay })
       finish(item, outcome)
     },
-    [address, chain, connect, finish, markWorking, signAndSendTransaction, signTransaction],
+    [address, approveDemo, chain, connect, finish, markWorking, signAndSendTransaction, signTransaction],
   )
 
   const reject = useCallback(
     async (id: string) => {
+      if (demoRef.current) return rejectDemo(id)
       const relay = relayRef.current
       const item = itemsRef.current.find((other) => other.request.id === id)
       if (!relay || !item || item.phase === 'working') return
@@ -250,20 +311,22 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       const outcome = await submitDenial({ request: item.request, relay })
       finish(item, outcome)
     },
-    [finish, markWorking],
+    [finish, markWorking, rejectDemo],
   )
 
   const value = useMemo<ApprovalsValue>(
     () => ({
       address,
       relayStatus,
-      items: [...items].sort((a, b) => b.request.createdAt - a.request.createdAt),
-      history,
+      items: [...(demo ? demoItems : items)].sort((a, b) => b.request.createdAt - a.request.createdAt),
+      history: demo ? demoHistory : history,
       approve,
       reject,
       reconnectRelay: () => setReconnectKey((key) => key + 1),
+      demo,
+      setDemo,
     }),
-    [address, relayStatus, items, history, approve, reject],
+    [address, relayStatus, items, history, approve, reject, demo, demoItems, demoHistory, setDemo],
   )
 
   return <ApprovalsContext.Provider value={value}>{children}</ApprovalsContext.Provider>

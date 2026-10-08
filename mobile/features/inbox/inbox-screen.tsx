@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import Animated, { LinearTransition, SlideInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { Eyebrow, Label, NetworkPill, NodButton, useNow, Wordmark } from '@/components/ui'
+import { DemoPill, Eyebrow, Label, NetworkPill, NodButton, useNow, Wordmark } from '@/components/ui'
 import { radius, space } from '@/constants/theme'
 import { useNetwork } from '@/features/network/use-network'
 import { useApprovals, type HistoryEntry, type Item } from '@/features/approvals/approvals-provider'
@@ -15,7 +15,7 @@ export function InboxScreen() {
   const { tokens } = useTheme()
   const router = useRouter()
   const { selectedNetwork } = useNetwork()
-  const { items, history, relayStatus, reconnectRelay } = useApprovals()
+  const { items, history, relayStatus, reconnectRelay, demo } = useApprovals()
   const now = useNow()
 
   return (
@@ -23,6 +23,7 @@ export function InboxScreen() {
       <View style={styles.header}>
         <Wordmark />
         <View style={styles.headerRight}>
+          {demo ? <DemoPill /> : null}
           <NetworkPill label={selectedNetwork.label} />
           <Pressable
             accessibilityRole="button"
@@ -36,7 +37,7 @@ export function InboxScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {relayStatus === 'replaced' ? (
+        {demo ? null : relayStatus === 'replaced' ? (
           <View style={[styles.banner, { borderColor: tokens.danger }]}>
             <Text style={{ color: tokens.danger, fontSize: 15 }}>
               Another phone took over this connection to your laptop.
