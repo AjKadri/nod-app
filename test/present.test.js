@@ -124,3 +124,13 @@ test("the details panel facts: recipient, action and fee", () => {
   );
   assert.deepEqual(many.recipient, { kind: "text", value: "2 recipients" });
 });
+
+test("risky is true for red warnings only: mismatch, failed preview, unknown program", () => {
+  assert.equal(presentReview(review()).risky, false);
+  assert.equal(presentReview(review({ note: "tiny 0.001 SOL test payment" })).risky, true);
+  assert.equal(presentReview(review({ ok: false, error: "boom" })).risky, true);
+  const odd = presentReview(review({ type: "raw", transfers: [], programs: [{ id: "Prog111", name: null }] }));
+  assert.equal(odd.risky, true);
+  // Other signers is an amber warning: still a normal approval.
+  assert.equal(presentReview(review({ refreshable: false })).risky, false);
+});

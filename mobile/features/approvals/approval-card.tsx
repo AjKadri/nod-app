@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import Animated, { SlideInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -30,11 +30,28 @@ export function ApprovalCard({
   const { selectedNetwork } = useNetwork()
   const now = useNow()
   const [open, setOpen] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const { presented, phase } = item
   const payload = (item.request.payload ?? {}) as { agent?: string }
   const agent = payload.agent || 'Unnamed agent'
   const working = phase === 'working'
   const ready = phase === 'ready'
+  const risky = !!presented?.risky
+
+  // The confirm step lapses on its own, so a stray second tap later does nothing.
+  useEffect(() => {
+    if (!confirming) return
+    const timer = setTimeout(() => setConfirming(false), 5000)
+    return () => clearTimeout(timer)
+  }, [confirming])
+
+  function onSendAnyway() {
+    if (!confirming) {
+      setConfirming(true)
+      return
+    }
+    onApprove()
+  }
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg }]}>
@@ -72,17 +89,37 @@ export function ApprovalCard({
         </ScrollView>
 
         <View style={styles.footer}>
-          <Label>{working ? 'Approve it in your wallet.' : 'Your wallet will ask you to sign.'}</Label>
-          <View style={styles.buttons}>
-            <NodButton title="Reject" variant="secondary" disabled={working} onPress={onReject} />
-            <NodButton
-              title={working ? 'Waiting for wallet…' : 'Continue to wallet'}
-              disabled={!ready}
-              onPress={onApprove}
-              style={styles.primary}
-              accessibilityHint="Opens your wallet so you can sign"
-            />
-          </View>
+          <Label>
+            {working
+              ? 'Approve it in your wallet.'
+              : risky
+                ? 'Something here does not look right. Rejecting is the safe choice.'
+                : 'Your wallet will ask you to sign.'}
+          </Label>
+          {risky ? (
+            <View style={styles.buttons}>
+              <NodButton
+                title={working ? 'Waiting for wallet…' : confirming ? 'Tap again to send' : 'Send anyway'}
+                variant={confirming ? 'dangerFilled' : 'danger'}
+                disabled={!ready}
+                onPress={onSendAnyway}
+                style={styles.compact}
+                accessibilityHint="Asks you to confirm, then opens your wallet so you can sign"
+              />
+              <NodButton title="Reject" disabled={working} onPress={onReject} style={styles.primary} />
+            </View>
+          ) : (
+            <View style={styles.buttons}>
+              <NodButton title="Reject" variant="secondary" disabled={working} onPress={onReject} />
+              <NodButton
+                title={working ? 'Waiting for wallet…' : 'Continue to wallet'}
+                disabled={!ready}
+                onPress={onApprove}
+                style={styles.primary}
+                accessibilityHint="Opens your wallet so you can sign"
+              />
+            </View>
+          )}
         </View>
       </Animated.View>
     </SafeAreaView>
@@ -258,4 +295,5 @@ const styles = StyleSheet.create({
   footer: { gap: 12, paddingBottom: space.screen, paddingHorizontal: space.screen, paddingTop: 8 },
   buttons: { flexDirection: 'row', gap: 12 },
   primary: { flex: 1 },
+  compact: { flexShrink: 0 },
 })

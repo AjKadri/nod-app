@@ -65,7 +65,7 @@ export function NetworkPill({ label }: { label: string }) {
 type ButtonProps = {
   title: string
   onPress: () => void
-  variant?: 'primary' | 'secondary' | 'ghost'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerFilled'
   disabled?: boolean
   style?: StyleProp<ViewStyle>
   accessibilityHint?: string
@@ -74,8 +74,22 @@ type ButtonProps = {
 /** 56 dp tall, 16 dp radius. One primary per screen. */
 export function NodButton({ title, onPress, variant = 'primary', disabled, style, accessibilityHint }: ButtonProps) {
   const { tokens } = useTheme()
-  const fill = variant === 'primary' ? tokens.accent : variant === 'secondary' ? tokens.raised : 'transparent'
-  const color = variant === 'primary' ? tokens.onAccent : variant === 'ghost' ? tokens.accentText : tokens.text
+  const fills = {
+    primary: tokens.accent,
+    secondary: tokens.raised,
+    ghost: 'transparent',
+    danger: 'transparent',
+    dangerFilled: tokens.danger,
+  }
+  const colors = {
+    primary: tokens.onAccent,
+    secondary: tokens.text,
+    ghost: tokens.accentText,
+    danger: tokens.danger,
+    dangerFilled: tokens.bg,
+  }
+  const fill = fills[variant]
+  const color = colors[variant]
   const textStyle: TextStyle = { color, fontSize: size.body, fontWeight: '600' }
   return (
     <Pressable
@@ -88,6 +102,7 @@ export function NodButton({ title, onPress, variant = 'primary', disabled, style
       style={({ pressed }) => [
         styles.button,
         { backgroundColor: fill, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 },
+        variant === 'danger' || variant === 'dangerFilled' ? { borderColor: tokens.danger, borderWidth: 1 } : null,
         style,
       ]}
     >

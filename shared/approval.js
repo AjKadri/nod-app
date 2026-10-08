@@ -92,10 +92,6 @@ function emptySignatures(count) {
   return Array.from({ length: count }, () => new Uint8Array(64));
 }
 
-function hasRealSignature(sig) {
-  return sig.some((byte) => byte !== 0);
-}
-
 /**
  * Turn a request into a transaction that is ready for the wallet to sign.
  *

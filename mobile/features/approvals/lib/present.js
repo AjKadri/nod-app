@@ -71,6 +71,7 @@ function recipientLabel(review) {
  *   action: string, recipient: { kind: "address" | "text", value: string },
  *   fee: string, previewOk: boolean, previewText: string,
  *   mismatch: { said: string, actual: string, message: string } | null,
+ *   risky: boolean,
  *   warnings: { level: "danger" | "warn", text: string }[],
  *   programs: { id: string, name: string | null }[],
  *   transfers: { to: string, lamports: number | null }[],
@@ -134,6 +135,8 @@ function presentReview(review) {
     previewOk: preview.ok,
     previewText: preview.ok ? "Simulation completed" : `Failed: ${preview.error || "unknown error"}`,
     mismatch,
+    /** True when any red warning shows: the card then makes Reject the main action. */
+    risky: warnings.some((w) => w.level === "danger"),
     warnings,
     programs: summary.programs,
     transfers: summary.transfers.map((t) => ({ to: t.to, lamports: t.lamports })),

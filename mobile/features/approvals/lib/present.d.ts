@@ -12,6 +12,8 @@ export type Presented = {
   previewOk: boolean
   previewText: string
   mismatch: { said: string; actual: string; message: string } | null
+  /** True when any red (danger) warning shows. */
+  risky: boolean
   warnings: { level: 'danger' | 'warn'; text: string }[]
   programs: { id: string; name: string | null }[]
   transfers: { to: string; lamports: number | null }[]
