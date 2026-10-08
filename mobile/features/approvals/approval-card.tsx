@@ -75,7 +75,7 @@ export function ApprovalCard({
               <Text style={{ color: tokens.text, fontSize: size.body + 2 }} numberOfLines={1}>
                 {agent}
               </Text>
-              <Label>From your paired laptop</Label>
+              <Label>From {item.pairingLabel}</Label>
             </View>
             <Label>{timeAgo(item.request.createdAt, now)}</Label>
           </View>

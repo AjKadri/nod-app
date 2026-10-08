@@ -1,4 +1,5 @@
 import { useMobileWallet } from '@wallet-ui/react-native-web3js'
+import { useRouter, type Href } from 'expo-router'
 import React, { useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import Animated, { FadeInUp } from 'react-native-reanimated'
@@ -7,12 +8,16 @@ import { useTheme } from '@/components/theme-provider'
 import { Label, NodButton, Wordmark } from '@/components/ui'
 import { space } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
+import { usePairings } from '@/features/pairing/pairing-provider'
 
-/** First screen: connect a wallet. Pairing with a laptop by QR arrives with the pairing work. */
+/** First screen: connect a wallet. Connect a wallet, pair a laptop, or try the demo. */
 export function WelcomeScreen() {
   const { tokens } = useTheme()
   const { connect } = useMobileWallet()
   const { setDemo } = useApprovals()
+  const { pairings } = usePairings()
+  const router = useRouter()
+  const paired = pairings[0]
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,7 +51,12 @@ export function WelcomeScreen() {
           onPress={onConnect}
           accessibilityHint="Opens your Solana wallet to link it with Nod"
         />
-        <NodButton title="Pair with laptop · coming soon" variant="secondary" disabled onPress={() => {}} />
+        <NodButton
+          title={paired ? `Paired with ${paired.label}` : 'Pair with laptop'}
+          variant="secondary"
+          onPress={() => router.push('/pair' as Href)}
+          accessibilityHint="Scan the code your laptop shows to link it with this phone"
+        />
         <NodButton
           title="Try demo"
           variant="ghost"

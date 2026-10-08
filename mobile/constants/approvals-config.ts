@@ -1,16 +1,9 @@
 /**
- * Where the phone finds the relay.
- *
- * Spike setup: the relay runs on your laptop on port 8787. Run
- *   adb reverse tcp:8787 tcp:8787
- * so that "localhost" on the phone (or emulator) reaches the laptop.
- *
- * EXPO_PUBLIC_* values are baked into the app at build time and are readable by
- * anyone who has the APK. That is fine for a local spike token, not for a real secret.
+ * Where the phone finds a relay: it does not. Each pairing carries its own relay
+ * address and key (see features/pairing). What stays here is how an approved
+ * transaction is sent.
  */
 export class ApprovalsConfig {
-  static relayUrl = process.env.EXPO_PUBLIC_RELAY_URL ?? 'http://localhost:8787'
-  static relayToken = process.env.EXPO_PUBLIC_RELAY_TOKEN ?? ''
   /**
    * Who broadcasts an approved transaction. Default: Nod (the wallet only signs),
    * because some wallets (the Mock MWA Wallet among them) fail to send on devnet.

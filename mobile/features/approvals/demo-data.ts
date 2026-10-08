@@ -13,6 +13,8 @@ export function buildDemo(now: number): { items: Item[]; history: HistoryEntry[]
         expiresAt: createdAt + 10 * 60 * 1000,
         payload: { type: 'transfer', note: sample.note, agent: sample.agent },
       },
+      pairingId: 'demo',
+      pairingLabel: 'Demo laptop',
       presented: sample.presented,
       phase: 'ready',
     }

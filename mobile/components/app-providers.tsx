@@ -3,6 +3,7 @@ import { MobileWalletProvider } from '@wallet-ui/react-native-web3js'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AppConfig } from '@/constants/app-config'
 import { ApprovalsProvider } from '@/features/approvals/approvals-provider'
+import { PairingProvider } from '@/features/pairing/pairing-provider'
 import { NetworkProvider } from '@/features/network/network-provider'
 import { useNetwork } from '@/features/network/use-network'
 
@@ -11,7 +12,9 @@ export function AppProviders({ children }: PropsWithChildren) {
     <ThemeProvider>
       <NetworkProvider>
         <SolanaNetworkProvider>
-          <ApprovalsProvider>{children}</ApprovalsProvider>
+          <PairingProvider>
+            <ApprovalsProvider>{children}</ApprovalsProvider>
+          </PairingProvider>
         </SolanaNetworkProvider>
       </NetworkProvider>
     </ThemeProvider>

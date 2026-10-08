@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons'
 import { useMobileWallet } from '@wallet-ui/react-native-web3js'
 import { useRouter, type Href } from 'expo-router'
-import React from 'react'
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import React, { useState } from 'react'
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { DetailRow, Eyebrow, Label, NodButton } from '@/components/ui'
-import { ApprovalsConfig } from '@/constants/approvals-config'
 import { radius, space, type ThemePreference } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
+import { usePairings } from '@/features/pairing/pairing-provider'
 import { useNetwork } from '@/features/network/use-network'
 import { shorten } from '@/utils/format'
 
@@ -23,6 +23,7 @@ const RELAY_LABEL = {
   connecting: 'Connecting…',
   offline: 'Offline',
   replaced: 'Taken over by another phone',
+  revoked: 'Unpaired',
 } as const
 
 export default function SettingsScreen() {
@@ -30,9 +31,31 @@ export default function SettingsScreen() {
   const router = useRouter()
   const { account, disconnect } = useMobileWallet()
   const { networks, selectedNetwork, setSelectedNetwork } = useNetwork()
-  const { relayStatus, demo, setDemo } = useApprovals()
+  const { pairingStatuses, demo, setDemo } = useApprovals()
+  const { pairings, revoke } = usePairings()
+  const [revokeNote, setRevokeNote] = useState<string | null>(null)
 
-  const relayHost = ApprovalsConfig.relayUrl.replace(/^https?:\/\//, '')
+  function confirmRevoke(id: string, label: string) {
+    Alert.alert(
+      `Unpair ${label}?`,
+      'This laptop will no longer be able to send requests to this phone. You can pair it again later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unpair',
+          style: 'destructive',
+          onPress: async () => {
+            const { relayNotified } = await revoke(id)
+            setRevokeNote(
+              relayNotified
+                ? null
+                : `${label} could not be reached, so it may still think it is paired. It cannot send anything this phone will accept.`,
+            )
+          },
+        },
+      ],
+    )
+  }
 
   async function onDisconnect() {
     await disconnect()
@@ -84,8 +107,26 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title="Paired laptops">
-          <DetailRow label={relayHost} value={RELAY_LABEL[relayStatus]} last />
-          <Label style={styles.help}>Pairing by QR code, and revoking a laptop, are coming.</Label>
+          {pairings.length === 0 ? <Label style={styles.help}>No laptop paired.</Label> : null}
+          {pairings.map((pairing) => (
+            <View key={pairing.id} style={styles.pairRow}>
+              <DetailRow label={pairing.label} value={RELAY_LABEL[pairingStatuses[pairing.id] ?? 'connecting']} last />
+              <Label>{pairing.relay.replace(/^https?:\/\//, '')}</Label>
+              <NodButton
+                title="Unpair"
+                variant="danger"
+                onPress={() => confirmRevoke(pairing.id, pairing.label)}
+                accessibilityHint="Stops this laptop from sending requests to this phone"
+              />
+            </View>
+          ))}
+          {revokeNote ? <Label style={styles.help}>{revokeNote}</Label> : null}
+          <NodButton
+            title={pairings.length ? 'Pair another laptop' : 'Pair with laptop'}
+            variant="secondary"
+            onPress={() => router.push('/pair' as Href)}
+            style={styles.pairButton}
+          />
         </Section>
 
         <Section title="Daily limit">
@@ -180,7 +221,9 @@ const styles = StyleSheet.create({
   switchRow: { alignItems: 'center', flexDirection: 'row', gap: 16, paddingVertical: 12 },
   switchText: { flex: 1, gap: 2 },
   inline: { alignSelf: 'flex-start', paddingHorizontal: 0 },
-  help: { paddingBottom: 12 },
+  help: { paddingBottom: 12, paddingTop: 12 },
+  pairRow: { gap: 8, paddingTop: 4, paddingBottom: 12 },
+  pairButton: { marginVertical: 12 },
   segmented: { borderRadius: radius.panel, flexDirection: 'row', margin: 8, padding: 4 },
   segment: { alignItems: 'center', borderRadius: 12, flex: 1, justifyContent: 'center', minHeight: 44 },
 })

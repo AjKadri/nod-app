@@ -12,6 +12,8 @@ import React, {
   useState,
 } from 'react'
 import { ApprovalsConfig } from '@/constants/approvals-config'
+import { tokenOf } from '@/features/pairing/pairing-store'
+import { usePairings } from '@/features/pairing/pairing-provider'
 import { buildDemo } from './demo-data'
 import { reviewRequest, type Review, type SignAndSend } from './lib/approval'
 import { rpcChain } from './lib/chain'
@@ -23,6 +25,9 @@ export type Phase = 'reviewing' | 'ready' | 'working'
 
 export type Item = {
   request: RelayRequest
+  /** Which paired laptop sent it, and what that laptop is called. */
+  pairingId: string
+  pairingLabel: string
   review?: Review
   presented?: Presented
   phase: Phase
@@ -47,7 +52,10 @@ export type HistoryEntry = {
 
 type ApprovalsValue = {
   address?: string
+  /** One word for all pairings: replaced if any was taken over, else online if any is. */
   relayStatus: RelayStatus
+  /** Connection status of each paired laptop, by pairing id. */
+  pairingStatuses: Record<string, RelayStatus>
   /** Waiting requests, newest first. */
   items: Item[]
   /** Finished requests, newest first. */
@@ -66,6 +74,7 @@ const HISTORY_LIMIT = 50
 
 const ApprovalsContext = createContext<ApprovalsValue>({
   relayStatus: 'offline',
+  pairingStatuses: {},
   items: [],
   history: [],
   approve: async () => {},
@@ -74,6 +83,15 @@ const ApprovalsContext = createContext<ApprovalsValue>({
   demo: false,
   setDemo: () => {},
 })
+
+function overallStatus(statuses: Record<string, RelayStatus>, ids: string[]): RelayStatus {
+  const list = ids.map((id) => statuses[id] ?? 'connecting')
+  if (list.length === 0) return 'offline'
+  if (list.includes('replaced')) return 'replaced'
+  if (list.includes('online')) return 'online'
+  if (list.includes('connecting')) return 'connecting'
+  return 'offline'
+}
 
 function haptic(run: () => Promise<void>) {
   run().catch(() => {})
@@ -112,9 +130,10 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const { account, connection, connect, signAndSendTransaction, signTransaction } = useMobileWallet()
   const address = account?.address.toString()
   const chain = useMemo(() => rpcChain(connection), [connection])
-  const relayRef = useRef<RelayClient | null>(null)
+  const { pairings, forget } = usePairings()
+  const relaysRef = useRef<Map<string, RelayClient>>(new Map())
   const itemsRef = useRef<Item[]>([])
-  const [relayStatus, setRelayStatus] = useState<RelayStatus>('offline')
+  const [statuses, setStatuses] = useState<Record<string, RelayStatus>>({})
   const [items, setItemsState] = useState<Item[]>([])
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
@@ -160,49 +179,65 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   }, [])
 
   useEffect(() => {
-    if (!address) return
+    if (!address || pairings.length === 0) return
 
-    const client = createRelayClient({
-      baseUrl: ApprovalsConfig.relayUrl,
-      token: ApprovalsConfig.relayToken,
-      WebSocketImpl: WebSocket,
-      fetchImpl: fetch,
-      onStatus: setRelayStatus,
-      onRequest: (request) => {
-        setItems((previous) => [...previous, { request, phase: 'reviewing' }])
-        haptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light))
-        reviewRequest({ payload: request.payload, walletAddress: address, chain })
-          .then((review) => {
-            const presented = presentReview(review)
-            setItems((previous) =>
-              previous.map((item) =>
-                item.request.id === request.id ? { ...item, review, presented, phase: 'ready' } : item,
-              ),
-            )
-          })
-          .catch(async (error: unknown) => {
-            // Could not even be shown (bad address, wrong fee payer, undecodable). Tell the agent.
-            const outcome = await submitInvalid({ request, relay: client, error })
-            const gone = itemsRef.current.find((item) => item.request.id === request.id)
-            setItems((previous) => previous.filter((item) => item.request.id !== request.id))
-            remember(entryFor(gone ?? { request, phase: 'reviewing' }, outcome))
-          })
-      },
-      // Answered elsewhere, expired, or withdrawn by the agent: take it off the screen
-      // unless we are already in the middle of signing it.
-      onResolved: (id) =>
-        setItems((previous) => previous.filter((item) => item.request.id !== id || item.phase === 'working')),
-    })
-    client.setWallet(address)
-    relayRef.current = client
+    const clients = new Map<string, RelayClient>()
+    for (const pairing of pairings) {
+      const client = createRelayClient({
+        baseUrl: pairing.relay,
+        token: tokenOf(pairing),
+        WebSocketImpl: WebSocket,
+        fetchImpl: fetch,
+        onStatus: (status) => {
+          setStatuses((previous) => ({ ...previous, [pairing.id]: status }))
+          // The laptop revoked the pairing: forget it here too.
+          if (status === 'revoked') forget(pairing.id, `${pairing.label} ended the pairing.`)
+        },
+        onRequest: (request) => {
+          setItems((previous) => [
+            ...previous,
+            { request, phase: 'reviewing', pairingId: pairing.id, pairingLabel: pairing.label },
+          ])
+          haptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light))
+          reviewRequest({ payload: request.payload, walletAddress: address, chain })
+            .then((review) => {
+              const presented = presentReview(review)
+              setItems((previous) =>
+                previous.map((item) =>
+                  item.request.id === request.id ? { ...item, review, presented, phase: 'ready' } : item,
+                ),
+              )
+            })
+            .catch(async (error: unknown) => {
+              // Could not even be shown (bad address, wrong fee payer, undecodable). Tell the agent.
+              const outcome = await submitInvalid({ request, relay: client, error })
+              const gone = itemsRef.current.find((item) => item.request.id === request.id)
+              setItems((previous) => previous.filter((item) => item.request.id !== request.id))
+              remember(
+                entryFor(
+                  gone ?? { request, phase: 'reviewing', pairingId: pairing.id, pairingLabel: pairing.label },
+                  outcome,
+                ),
+              )
+            })
+        },
+        // Answered elsewhere, expired, or withdrawn by the agent: take it off the screen
+        // unless we are already in the middle of signing it.
+        onResolved: (id) =>
+          setItems((previous) => previous.filter((item) => item.request.id !== id || item.phase === 'working')),
+      })
+      client.setWallet(address)
+      clients.set(pairing.id, client)
+    }
+    relaysRef.current = clients
 
     return () => {
-      client.close()
-      relayRef.current = null
+      clients.forEach((client) => client.close())
+      relaysRef.current = new Map()
       setItems(() => [])
-      setRelayStatus('offline')
+      setStatuses({})
     }
-  }, [address, chain, reconnectKey, remember, setItems])
+  }, [address, chain, forget, pairings, reconnectKey, remember, setItems])
 
   const finish = useCallback(
     (item: Item, outcome: Outcome) => {
@@ -270,8 +305,8 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const approve = useCallback(
     async (id: string) => {
       if (demoRef.current) return approveDemo(id)
-      const relay = relayRef.current
       const item = itemsRef.current.find((other) => other.request.id === id)
+      const relay = item ? relaysRef.current.get(item.pairingId) : undefined
       if (!relay || !address || !item || item.phase !== 'ready') return
       markWorking(id)
 
@@ -304,8 +339,8 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const reject = useCallback(
     async (id: string) => {
       if (demoRef.current) return rejectDemo(id)
-      const relay = relayRef.current
       const item = itemsRef.current.find((other) => other.request.id === id)
+      const relay = item ? relaysRef.current.get(item.pairingId) : undefined
       if (!relay || !item || item.phase === 'working') return
       markWorking(id)
       const outcome = await submitDenial({ request: item.request, relay })
@@ -317,7 +352,11 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const value = useMemo<ApprovalsValue>(
     () => ({
       address,
-      relayStatus,
+      relayStatus: overallStatus(
+        statuses,
+        pairings.map((pairing) => pairing.id),
+      ),
+      pairingStatuses: statuses,
       items: [...(demo ? demoItems : items)].sort((a, b) => b.request.createdAt - a.request.createdAt),
       history: demo ? demoHistory : history,
       approve,
@@ -326,7 +365,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       demo,
       setDemo,
     }),
-    [address, relayStatus, items, history, approve, reject, demo, demoItems, demoHistory, setDemo],
+    [address, statuses, pairings, items, history, approve, reject, demo, demoItems, demoHistory, setDemo],
   )
 
   return <ApprovalsContext.Provider value={value}>{children}</ApprovalsContext.Provider>

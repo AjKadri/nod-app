@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { DemoPill, Eyebrow, Label, NetworkPill, NodButton, useNow, Wordmark } from '@/components/ui'
 import { radius, space } from '@/constants/theme'
+import { usePairings } from '@/features/pairing/pairing-provider'
 import { useNetwork } from '@/features/network/use-network'
 import { useApprovals, type HistoryEntry, type Item } from '@/features/approvals/approvals-provider'
 import { timeAgo } from '@/utils/format'
@@ -16,7 +17,9 @@ export function InboxScreen() {
   const router = useRouter()
   const { selectedNetwork } = useNetwork()
   const { items, history, relayStatus, reconnectRelay, demo } = useApprovals()
+  const { pairings, notice, dismissNotice } = usePairings()
   const now = useNow()
+  const unpaired = !demo && pairings.length === 0
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg }]}>
@@ -37,7 +40,16 @@ export function InboxScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {demo ? null : relayStatus === 'replaced' ? (
+        {notice ? (
+          <View style={[styles.banner, { borderColor: tokens.warn }]}>
+            <Text accessibilityRole="alert" style={{ color: tokens.text, fontSize: 15 }}>
+              {notice}
+            </Text>
+            <NodButton title="Dismiss" variant="secondary" onPress={dismissNotice} />
+          </View>
+        ) : null}
+
+        {demo || unpaired ? null : relayStatus === 'replaced' ? (
           <View style={[styles.banner, { borderColor: tokens.danger }]}>
             <Text style={{ color: tokens.danger, fontSize: 15 }}>
               Another phone took over this connection to your laptop.
@@ -53,8 +65,17 @@ export function InboxScreen() {
         <Eyebrow>Waiting for you</Eyebrow>
         {items.length === 0 ? (
           <View style={[styles.empty, { borderColor: tokens.line, backgroundColor: tokens.surface }]}>
-            <Text style={{ color: tokens.text, fontSize: 18, fontWeight: '600' }}>Nothing to approve</Text>
-            <Label style={{ lineHeight: 20 }}>When your agent needs to spend, the request shows up here.</Label>
+            <Text style={{ color: tokens.text, fontSize: 18, fontWeight: '600' }}>
+              {unpaired ? 'No laptop paired yet' : 'Nothing to approve'}
+            </Text>
+            <Label style={{ lineHeight: 20 }}>
+              {unpaired
+                ? 'Pair the laptop your agent runs on. Until then no request can reach this phone.'
+                : 'When your agent needs to spend, the request shows up here.'}
+            </Label>
+            {unpaired ? (
+              <NodButton title="Pair with laptop" onPress={() => router.push('/pair' as Href)} style={styles.cta} />
+            ) : null}
           </View>
         ) : (
           items.map((item) => (
@@ -162,6 +183,7 @@ const styles = StyleSheet.create({
   },
   headerRight: { alignItems: 'center', flexDirection: 'row', gap: 14 },
   content: { gap: 12, padding: space.screen, paddingTop: 8 },
+  cta: { marginTop: 8 },
   banner: { borderRadius: radius.panel, borderWidth: 1, gap: 12, padding: 16 },
   empty: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, gap: 6, padding: 20 },
   row: {

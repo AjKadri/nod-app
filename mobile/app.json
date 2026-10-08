@@ -40,6 +40,14 @@
         }
       ],
       "expo-web-browser",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Nod uses the camera only to scan the pairing code on your laptop.",
+          "recordAudioAndroid": false
+        }
+      ],
       [
         "expo-build-properties",
         {

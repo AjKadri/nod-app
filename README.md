@@ -64,7 +64,13 @@ adb reverse tcp:8787 tcp:8787     # lets "localhost:8787" on the phone reach you
 npm run android                   # Test 1 passes when the app opens
 ```
 
-In another terminal, from this folder: `npm run relay`.
+In another terminal, from this folder: `npm run relay`, then pair the phone with this laptop:
+
+```bash
+npm run pair      # shows a QR code (add --relay http://<laptop-ip>:8787 for a phone that is not on adb reverse)
+```
+
+In the app choose **Pair with laptop** and scan the code (or paste the `nod://pair…` line). The code works once and expires after 10 minutes. `npm run pair -- --status` shows whether the phone is connected, and `npm run pair -- --revoke` ends the pairing from the laptop. In the app, **Settings → Paired laptops → Unpair** ends it from the phone. The laptop keeps its key in `~/.nod/agent.json`; agents started by the MCP server pick it up on their own.
 
 1. **Test 2.** In the mock wallet press **Authenticate** (valid for 15 minutes). In the app press **Connect**, fund the shown address with devnet SOL, press **Sign transaction**. Pass: it confirms on a devnet explorer.
 2. **Test 3.** The app's Approvals card should say `Relay online`. Run `node agent/request.js transfer --to <ADDRESS> --sol 0.001`. Pass: the request appears within 2 seconds, Approve prints a signature on the laptop, Deny prints `DENIED`.
@@ -96,7 +102,7 @@ Then ask it: "send 0.001 SOL to <ADDRESS> on devnet". Tools: `get_wallet_address
 
 ## What the tests found that matters for the real build
 
-- **One phone per relay.** With two phones connected, both saw the same request and both signed it, so the money moved twice. The relay now keeps only the newest phone connection. The real product needs proper pairing.
+- **One phone per relay.** With two phones connected, both saw the same request and both signed it, so the money moved twice. The relay now keeps only the newest phone connection. Pairing now fixes this: a second phone cannot join an existing pairing.
 - **Withdraw on timeout.** If the agent stops waiting, the request is cancelled so the phone cannot approve it afterwards with nobody listening.
 - **The agent's note cannot be trusted.** The screen shows the simulated balance change, not the agent's description. A request labelled "tiny test payment" that sends 0.9 SOL shows as 0.9 SOL.
 - **Blockhash refresh works only when the wallet is the sole signer.** Multi-signer transactions are passed through unchanged and must be approved before they expire.
@@ -110,7 +116,8 @@ Then ask it: "send 0.001 SOL to <ADDRESS> on devnet". Tools: `get_wallet_address
 
 ## Security limits of this spike
 
-- No pairing and no accounts. Anyone who can reach the relay can send a request to the phone. It listens on `127.0.0.1` only; do not expose it. `RELAY_TOKEN` adds a shared password and nothing more.
+- Pairing: each laptop and phone get their own secret, stored on the relay only as a hash. Anyone without a pairing is refused, and one pairing cannot see another's requests. The relay still speaks plain HTTP locally; do not expose it to the internet until the hosted HTTPS relay (Task 3) exists, because the keys then travel unencrypted. The pairing code in the QR is a one-time password, so do not photograph it or share it.
+- A laptop whose pairing is revoked while offline learns about it on its next call. The phone treats a refused key as revoked and drops it.
 - `sim/.test-wallet.json` is a throwaway key for devnet or the local stand-in. Never fund it with real SOL.
 - The Mock MWA Wallet is a testing wallet. Never use it with real funds.
 
