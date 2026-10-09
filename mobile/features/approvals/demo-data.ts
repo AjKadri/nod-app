@@ -38,6 +38,7 @@ export function buildDemo(now: number): { items: Item[]; history: HistoryEntry[]
     recipient: sample.recipient,
     status: sample.status,
     reason: sample.reason,
+    ...(sample.auto ? { auto: true } : {}),
     reported: true,
     at: sample.daysAgo
       ? onDay(now, sample.daysAgo, sample.hour ?? 12, sample.minute ?? 0)

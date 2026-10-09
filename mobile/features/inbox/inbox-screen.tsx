@@ -130,6 +130,9 @@ function PendingRow({ item, now, onPress }: { item: Item; now: number; onPress: 
           {agent}
         </Text>
         <Label numberOfLines={1}>{summary}</Label>
+        {item.autoRunning ? (
+          <Text style={{ color: tokens.accentText, fontSize: 13 }}>Approving automatically…</Text>
+        ) : null}
         {presented?.mismatch ? (
           <Text style={{ color: tokens.danger, fontSize: 13 }}>Amount differs from the agent’s note</Text>
         ) : null}
@@ -153,12 +156,13 @@ const STATUS = {
 function HistoryRow({ entry, now, onPress }: { entry: HistoryEntry; now: number; onPress: () => void }) {
   const { tokens } = useTheme()
   const meta = STATUS[entry.status]
+  const label = entry.auto ? (entry.status === 'approved' ? 'Auto-approved' : `${meta.label}, auto`) : meta.label
   const color =
     entry.status === 'approved' ? tokens.accentText : entry.status === 'rejected' ? tokens.danger : tokens.warn
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${meta.label}, ${entry.agent}`}
+      accessibilityLabel={`${label}, ${entry.agent}`}
       onPress={onPress}
       style={({ pressed }) => [styles.historyRow, { borderBottomColor: tokens.line, opacity: pressed ? 0.7 : 1 }]}
     >
@@ -169,7 +173,7 @@ function HistoryRow({ entry, now, onPress }: { entry: HistoryEntry; now: number;
         </Text>
         <View style={styles.statusLine}>
           <Ionicons name={meta.icon} size={14} color={color} />
-          <Text style={{ color, fontSize: 13 }}>{meta.label}</Text>
+          <Text style={{ color, fontSize: 13 }}>{label}</Text>
         </View>
       </View>
       <View style={styles.rowEnd}>

@@ -47,7 +47,15 @@ export default function ResultScreen() {
     )
   }
 
-  const meta = COPY[entry.status]
+  const auto = entry.auto === true
+  const meta =
+    auto && entry.status === 'approved'
+      ? {
+          ...COPY.approved,
+          title: 'Auto-approved',
+          note: 'Approved on its own, within your daily limit. Your wallet signed it and the payment is confirmed. The agent has been told.',
+        }
+      : COPY[entry.status]
   const color =
     entry.status === 'approved' ? tokens.accentText : entry.status === 'rejected' ? tokens.danger : tokens.warn
   const note = entry.demo
@@ -86,7 +94,10 @@ export default function ResultScreen() {
       </Animated.View>
 
       <View style={[styles.panel, { backgroundColor: tokens.raised }]}>
-        <DetailRow label="Agent" value={entry.agent} last={!entry.recipient && !entry.signature} />
+        <DetailRow label="Agent" value={entry.agent} last={!auto && !entry.recipient && !entry.signature} />
+        {auto ? (
+          <DetailRow label="Approval" value="Automatic, daily limit" last={!entry.recipient && !entry.signature} />
+        ) : null}
         {entry.recipient ? (
           <DetailRow label="Recipient" value={shorten(entry.recipient)} monospace last={!entry.signature} />
         ) : null}

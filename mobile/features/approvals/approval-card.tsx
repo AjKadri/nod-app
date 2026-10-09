@@ -94,9 +94,16 @@ export function ApprovalCard({
         </ScrollView>
 
         <View style={styles.footer}>
+          {item.autoNote && ready ? (
+            <Text accessibilityRole="alert" style={{ color: tokens.warn, fontSize: 14, lineHeight: 20 }}>
+              {item.autoNote}
+            </Text>
+          ) : null}
           <Label>
             {working
-              ? 'Approve it in your wallet.'
+              ? item.autoRunning
+                ? 'Approving on its own, within your daily limit. Your wallet signs it.'
+                : 'Approve it in your wallet.'
               : risky
                 ? 'Something here does not look right. Rejecting is the safe choice.'
                 : 'Your wallet will ask you to sign.'}

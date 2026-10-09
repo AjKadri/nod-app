@@ -70,6 +70,7 @@ function demoHistory() {
       amount: amountOf("", "Research agent", 2_000_000),
       recipient: SAMPLE_RECIPIENT,
       status: "approved",
+      auto: true,
       ageSeconds: 3_600,
     },
     {

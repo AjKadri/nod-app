@@ -1,13 +1,26 @@
 import { Ionicons } from '@expo/vector-icons'
 import { useMobileWallet } from '@wallet-ui/react-native-web3js'
 import { useRouter, type Href } from 'expo-router'
-import React, { useState } from 'react'
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import React, { useEffect, useState } from 'react'
+import {
+  Alert,
+  Keyboard,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { DetailRow, Eyebrow, Label, NodButton } from '@/components/ui'
 import { radius, space, type ThemePreference } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
+import { formatSol } from '@/features/approvals/lib/approval'
+import { parseSolToLamports } from '@/features/approvals/lib/autoapprove'
 import { usePairings } from '@/features/pairing/pairing-provider'
 import { usePush } from '@/features/push/push-provider'
 import { useNetwork } from '@/features/network/use-network'
@@ -161,7 +174,7 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title="Daily limit">
-          <DetailRow label="Auto-approve small payments" value="Coming soon" last />
+          <AutoApproveSettings />
         </Section>
 
         <Section title="Theme">
@@ -181,6 +194,127 @@ export default function SettingsScreen() {
         </Section>
       </ScrollView>
     </SafeAreaView>
+  )
+}
+
+/** "0.05" for 50,000,000 lamports. */
+function solText(lamports: number) {
+  return formatSol(lamports).replace(/ SOL$/, '')
+}
+
+function AutoApproveSettings() {
+  const { tokens } = useTheme()
+  const { auto } = useApprovals()
+  const saved = auto.limitLamports > 0 ? solText(auto.limitLamports) : ''
+  const [text, setText] = useState(saved)
+  const [problem, setProblem] = useState<string | null>(null)
+
+  // Follow the saved limit unless the person is typing a different one.
+  useEffect(() => setText(saved), [saved])
+
+  const changed = text.trim() !== saved
+  const parsed = parseSolToLamports(text)
+
+  function save() {
+    if (parsed === null) {
+      setProblem('Enter an amount in SOL, like 0.05. The most you can set is 100 SOL.')
+      return
+    }
+    auto.setLimit(parsed)
+    setProblem(null)
+    Keyboard.dismiss()
+  }
+
+  function toggle(on: boolean) {
+    if (on && auto.limitLamports <= 0) {
+      setProblem('Set a daily limit first, then turn this on.')
+      return
+    }
+    setProblem(null)
+    auto.setEnabled(on)
+  }
+
+  return (
+    <View>
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={{ color: tokens.text, fontSize: 16 }}>Auto-approve small payments</Text>
+          <Label>
+            Skips the card for a plain SOL transfer to an address you approved yourself before, up to the limit.
+          </Label>
+        </View>
+        <Switch
+          accessibilityLabel="Auto-approve small payments"
+          value={auto.enabled}
+          disabled={!auto.loaded}
+          onValueChange={toggle}
+          trackColor={{ false: tokens.line, true: tokens.accent }}
+          thumbColor={tokens.onAccent}
+        />
+      </View>
+
+      <View style={[styles.limitBlock, { borderTopColor: tokens.line }]}>
+        <Label>Limit per day, in SOL</Label>
+        <View style={styles.limitRow}>
+          <TextInput
+            accessibilityLabel="Daily limit in SOL"
+            value={text}
+            onChangeText={(value) => {
+              setText(value)
+              setProblem(null)
+            }}
+            keyboardType="decimal-pad"
+            placeholder="0.05"
+            placeholderTextColor={tokens.muted}
+            returnKeyType="done"
+            onSubmitEditing={save}
+            style={[
+              styles.limitInput,
+              { color: tokens.text, borderColor: tokens.line, backgroundColor: tokens.raised },
+            ]}
+          />
+          <NodButton title="Save" variant="secondary" disabled={!changed || !text.trim()} onPress={save} />
+        </View>
+        {problem ? (
+          <Text accessibilityRole="alert" style={{ color: tokens.danger, fontSize: 14 }}>
+            {problem}
+          </Text>
+        ) : null}
+      </View>
+
+      {auto.limitLamports > 0 ? (
+        <>
+          <DetailRow label="Spent today" value={formatSol(auto.spentLamports)} />
+          <DetailRow label="Left today" value={formatSol(auto.remainingLamports)} last />
+        </>
+      ) : null}
+      <Label style={styles.help}>
+        Every payment through Nod counts, approved by hand or not, with its network fee. The day ends at midnight, your
+        local time. Anything else always asks: other kinds of transactions, a new address, any warning, a preview that
+        fails, or Pause everything. Nod must be open on screen.
+      </Label>
+
+      <View style={[styles.limitBlock, { borderTopColor: tokens.line }]}>
+        <Label>Addresses you approved</Label>
+        {auto.knownAddresses.length === 0 ? (
+          <Label>None yet. An address shows up here after you approve a payment to it yourself.</Label>
+        ) : (
+          auto.knownAddresses.map((address) => (
+            <View key={address} style={styles.knownRow}>
+              <Text style={{ color: tokens.text, flex: 1, fontFamily: 'monospace', fontSize: 14 }}>
+                {shorten(address, 6)}
+              </Text>
+              <NodButton
+                title="Forget"
+                variant="ghost"
+                onPress={() => auto.forgetAddress(address)}
+                accessibilityHint="This address asks you again next time"
+              />
+            </View>
+          ))
+        )}
+      </View>
+    </View>
   )
 }
 
@@ -253,6 +387,10 @@ const styles = StyleSheet.create({
   switchText: { flex: 1, gap: 2 },
   inline: { alignSelf: 'flex-start', paddingHorizontal: 0 },
   help: { paddingBottom: 12, paddingTop: 12 },
+  limitBlock: { borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingVertical: 12 },
+  limitRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
+  limitInput: { borderRadius: radius.panel, borderWidth: 1, flex: 1, fontSize: 18, height: 52, paddingHorizontal: 14 },
+  knownRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   pairRow: { gap: 8, paddingTop: 4, paddingBottom: 12 },
   pairButton: { marginVertical: 12 },
   segmented: { borderRadius: radius.panel, flexDirection: 'row', margin: 8, padding: 4 },

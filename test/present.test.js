@@ -153,6 +153,7 @@ test("demo mode sample data covers every state and uses the real presenter", () 
   for (const sample of [...demoRequests(), ...demoHistory()]) assert.ok(cleanAgentIcon(sample.agentIcon), sample.id);
   // Older history is dated by calendar day, not by seconds, so it falls in Yesterday and Earlier at any hour.
   assert.deepEqual(demoHistory().filter((h) => h.daysAgo).map((h) => h.daysAgo), [1, 3]);
+  assert.deepEqual(demoHistory().filter((h) => h.auto).map((h) => h.id), ["demo-done-approved"]);
   assert.ok(demoHistory().find((h) => h.status === "failed").reason);
   const ids = [...demoRequests(), ...demoHistory()].map((x) => x.id);
   assert.equal(new Set(ids).size, ids.length);

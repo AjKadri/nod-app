@@ -18,6 +18,8 @@ export type DemoHistoryItem = {
   recipient: string
   status: 'approved' | 'rejected' | 'failed'
   reason?: string
+  /** Approved without the card, within the daily limit. */
+  auto?: boolean
   /** Today's items: how long ago. Older items: which calendar day and time instead. */
   ageSeconds?: number
   daysAgo?: number

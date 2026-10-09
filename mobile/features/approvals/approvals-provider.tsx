@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Haptics from 'expo-haptics'
+import { AppState } from 'react-native'
 import { useMobileWallet } from '@wallet-ui/react-native-web3js'
 import React, {
   createContext,
@@ -14,11 +15,21 @@ import React, {
 import { ApprovalsConfig } from '@/constants/approvals-config'
 import { tokenOf } from '@/features/pairing/pairing-store'
 import { usePairings } from '@/features/pairing/pairing-provider'
+import { useAutoStore } from './auto-store'
 import { buildDemo } from './demo-data'
 import { cleanAgentName, describeAgent, type AgentIcon } from './lib/agent'
 import { reviewRequest, type Review, type SignAndSend } from './lib/approval'
+import { addressToLearn, decideAutoApprove, isPausedForAuto, ledgerEntryFor, outflowLamports } from './lib/autoapprove'
 import { rpcChain } from './lib/chain'
-import { submitApproval, submitDenial, submitInvalid, type Outcome } from './lib/flow'
+import {
+  explainError,
+  NeedsCardError,
+  submitApproval,
+  submitAutoApproval,
+  submitDenial,
+  submitInvalid,
+  type Outcome,
+} from './lib/flow'
 import { presentReview, type Presented } from './lib/present'
 import { createRelayClient, type RelayClient, type RelayRequest, type RelayStatus } from './lib/relayClient'
 
@@ -32,6 +43,10 @@ export type Item = {
   review?: Review
   presented?: Presented
   phase: Phase
+  /** Being approved without the card: the wallet is signing within the daily limit. */
+  autoRunning?: boolean
+  /** Why this one asks, when auto-approve is on but did not apply (shown on the card). */
+  autoNote?: string
 }
 
 export type HistoryEntry = {
@@ -46,6 +61,8 @@ export type HistoryEntry = {
   status: 'approved' | 'rejected' | 'failed'
   signature?: string
   reason?: string
+  /** Approved without the card, within the daily limit. */
+  auto?: boolean
   /** False when the relay could not be told, so the agent may still be waiting. */
   reported: boolean
   at: number
@@ -55,6 +72,20 @@ export type HistoryEntry = {
 
 /** Whether new requests are blocked: off, on for every paired laptop, or on for only some of them. */
 export type PauseState = 'off' | 'on' | 'partial'
+
+/** Auto-approve as the screens see it. Amounts are lamports. */
+export type AutoView = {
+  loaded: boolean
+  enabled: boolean
+  limitLamports: number
+  spentLamports: number
+  remainingLamports: number
+  /** Addresses approved by hand before, newest first. */
+  knownAddresses: string[]
+  setEnabled: (on: boolean) => void
+  setLimit: (lamports: number) => void
+  forgetAddress: (address: string) => void
+}
 
 type ApprovalsValue = {
   address?: string
@@ -80,6 +111,7 @@ type ApprovalsValue = {
   pauseProblem: { message: string; target: boolean } | null
   /** Pause or resume every paired laptop. The state shown is only what the relays confirm. */
   setPaused: (on: boolean) => Promise<void>
+  auto: AutoView
 }
 
 const HISTORY_KEY = 'nod.history.v1'
@@ -99,6 +131,17 @@ const ApprovalsContext = createContext<ApprovalsValue>({
   pauseBusy: false,
   pauseProblem: null,
   setPaused: async () => {},
+  auto: {
+    loaded: false,
+    enabled: false,
+    limitLamports: 0,
+    spentLamports: 0,
+    remainingLamports: 0,
+    knownAddresses: [],
+    setEnabled: () => {},
+    setLimit: () => {},
+    forgetAddress: () => {},
+  },
 })
 
 function overallStatus(statuses: Record<string, RelayStatus>, ids: string[]): RelayStatus {
@@ -149,6 +192,7 @@ function entryFor(item: Item, outcome: Outcome): HistoryEntry {
     status: outcome.status === 'approved' ? 'approved' : outcome.status === 'denied' ? 'rejected' : 'failed',
     signature: outcome.signature,
     reason: outcome.status === 'approved' ? undefined : outcome.reason,
+    ...(outcome.auto ? { auto: true } : {}),
     reported: outcome.reported,
     at: Date.now(),
   }
@@ -174,6 +218,18 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   // What each relay last said about "Pause everything", by pairing id.
   const [pausedBy, setPausedBy] = useState<Record<string, boolean>>({})
   const [pauseBusy, setPauseBusy] = useState(false)
+  // Auto-approve reads these at the moment it decides, so they are kept in refs as well as state.
+  const autoStore = useAutoStore()
+  const autoApi = autoStore.api
+  const pausedByRef = useRef<Record<string, boolean>>({})
+  const pauseBusyRef = useRef(false)
+  const pauseTargetRef = useRef<boolean | null>(null)
+  const resolvedRef = useRef(new Set<string>())
+  const autoClaimedRef = useRef(new Set<string>())
+  const historyRef = useRef<HistoryEntry[]>([])
+  const onReviewedRef = useRef<
+    (request: RelayRequest, pairingId: string, review: Review, presented: Presented) => void
+  >(() => {})
   const [pauseProblem, setPauseProblem] = useState<{ message: string; target: boolean } | null>(null)
   const [demoPaused, setDemoPaused] = useState(false)
   // Demo mode keeps its own items and history. Nothing in it reaches the wallet or the relay.
@@ -211,6 +267,10 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   }, [])
 
   useEffect(() => {
+    historyRef.current = history
+  }, [history])
+
+  useEffect(() => {
     if (!historyLoaded) return
     AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(history)).catch(() => {})
   }, [history, historyLoaded])
@@ -234,7 +294,10 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
           // The laptop revoked the pairing: forget it here too.
           if (status === 'revoked') forget(pairing.id, `${pairing.label} ended the pairing.`)
         },
-        onPaused: (paused) => setPausedBy((previous) => ({ ...previous, [pairing.id]: paused })),
+        onPaused: (paused) => {
+          pausedByRef.current = { ...pausedByRef.current, [pairing.id]: paused }
+          setPausedBy((previous) => ({ ...previous, [pairing.id]: paused }))
+        },
         onRequest: (request) => {
           setItems((previous) => [
             ...previous,
@@ -243,12 +306,8 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
           haptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light))
           reviewRequest({ payload: request.payload, walletAddress: address, chain })
             .then((review) => {
-              const presented = presentReview(review)
-              setItems((previous) =>
-                previous.map((item) =>
-                  item.request.id === request.id ? { ...item, review, presented, phase: 'ready' } : item,
-                ),
-              )
+              // Shows the card, or approves without it when every auto-approve rule holds.
+              onReviewedRef.current(request, pairing.id, review, presentReview(review))
             })
             .catch(async (error: unknown) => {
               // Could not even be shown (bad address, wrong fee payer, undecodable). Tell the agent.
@@ -265,8 +324,10 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
         },
         // Answered elsewhere, expired, or withdrawn by the agent: take it off the screen
         // unless we are already in the middle of signing it.
-        onResolved: (id) =>
-          setItems((previous) => previous.filter((item) => item.request.id !== id || item.phase === 'working')),
+        onResolved: (id) => {
+          resolvedRef.current.add(id)
+          setItems((previous) => previous.filter((item) => item.request.id !== id || item.phase === 'working'))
+        },
       })
       client.setWallet(address)
       clients.set(pairing.id, client)
@@ -279,6 +340,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       setItems(() => [])
       setStatuses({})
       setPausedBy({})
+      pausedByRef.current = {}
     }
   }, [address, chain, forget, pairings, reconnectKey, remember, setItems])
 
@@ -303,6 +365,144 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
     [setItems],
   )
 
+  // What left the wallet counts against today's limit, and a plain payment the person approved by
+  // hand teaches Nod that address. `maybeSent` is true when the wallet signed but the network call broke.
+  const settle = useCallback(
+    (item: Item, outcome: Outcome, maybeSent: boolean) => {
+      const entry = ledgerEntryFor({ id: item.request.id, review: item.review, outcome, now: Date.now(), maybeSent })
+      if (entry) autoApi.record(entry)
+      if (!outcome.auto && address) {
+        const learned = addressToLearn({ review: item.review, outcome, walletAddress: address })
+        if (learned) autoApi.learn(learned)
+      }
+      autoApi.release(item.request.id)
+    },
+    [address, autoApi],
+  )
+
+  // Approve without the card. The wallet still signs. Any wallet problem before it signs gives the card back.
+  const runAuto = useCallback(
+    async (item: Item, relay: RelayClient) => {
+      if (!address) return
+      let signed = false
+      const signAndSend: SignAndSend = async (transaction) => {
+        let result
+        try {
+          result = await signTransaction(transaction)
+        } catch (error) {
+          // A login that has expired, a prompt that was declined: nothing was sent. Do not log in again here.
+          throw new NeedsCardError(explainError(error))
+        }
+        signed = true
+        return chain.sendRaw(result.serialize())
+      }
+      let outcome
+      try {
+        outcome = await submitAutoApproval({ request: item.request, walletAddress: address, chain, signAndSend, relay })
+      } catch (error) {
+        outcome = signed
+          ? ({ status: 'failed', reason: explainError(error), reported: false, auto: true } as const)
+          : ({ status: 'needs_card', reason: explainError(error), reported: false } as const)
+      }
+      if (outcome.status === 'needs_card') {
+        autoApi.release(item.request.id)
+        setItems((previous) =>
+          previous.map((other) =>
+            other.request.id === item.request.id
+              ? {
+                  ...other,
+                  phase: 'ready',
+                  autoRunning: false,
+                  autoNote: `Auto-approve could not finish (${outcome.reason}), so it asks you.`,
+                }
+              : other,
+          ),
+        )
+        haptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning))
+        return
+      }
+      settle(item, outcome, signed)
+      finish(item, outcome)
+    },
+    [address, autoApi, chain, finish, setItems, settle, signTransaction],
+  )
+
+  const onReviewed = useCallback(
+    (request: RelayRequest, pairingId: string, review: Review, presented: Presented) => {
+      const toCard = (autoNote?: string) =>
+        setItems((previous) =>
+          previous.map((item) =>
+            item.request.id === request.id
+              ? { ...item, review, presented, phase: 'ready', autoRunning: false, autoNote }
+              : item,
+          ),
+        )
+      const relay = relaysRef.current.get(pairingId)
+      const snapshot = autoApi.snapshot()
+      const seenBefore =
+        autoClaimedRef.current.has(request.id) ||
+        snapshot.ledger.some((entry) => entry.id === request.id) ||
+        historyRef.current.some((entry) => entry.id === request.id)
+      const gone = resolvedRef.current.has(request.id) || Date.now() >= request.expiresAt
+      if (
+        !relay ||
+        !address ||
+        !snapshot.loaded ||
+        seenBefore ||
+        gone ||
+        demoRef.current ||
+        ApprovalsConfig.walletSends
+      ) {
+        toCard()
+        return
+      }
+      // Paused, or a Pause that is on its way: nothing is approved automatically.
+      const anyPaused = Object.values(pausedByRef.current).some(Boolean)
+      const paused =
+        isPausedForAuto({
+          pauseState: anyPaused ? 'on' : 'off',
+          unconfirmedPause: pauseBusyRef.current || pauseTargetRef.current === true,
+        }) || pausedByRef.current[pairingId] !== false
+      const decision = decideAutoApprove({
+        review,
+        settings: snapshot.settings,
+        walletAddress: address,
+        knownAddresses: snapshot.known,
+        ledger: snapshot.ledger,
+        reservedLamports: snapshot.reservedLamports,
+        now: Date.now(),
+        paused,
+        appActive: AppState.currentState === 'active',
+      })
+      if (!decision.auto) {
+        // Said only when it is news: warnings are already on the card, and "off" needs no explaining.
+        const quiet = decision.code === 'off' || decision.code === 'warnings' || decision.code === 'preview_failed'
+        toCard(quiet ? undefined : decision.reason)
+        return
+      }
+      autoClaimedRef.current.add(request.id)
+      autoApi.reserve(request.id, decision.outflowLamports)
+      const pairing = pairings.find((other) => other.id === pairingId)
+      const item: Item = {
+        request,
+        pairingId,
+        pairingLabel: pairing?.label ?? '',
+        review,
+        presented,
+        phase: 'working',
+        autoRunning: true,
+      }
+      setItems((previous) => previous.map((other) => (other.request.id === request.id ? item : other)))
+      haptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light))
+      void runAuto(item, relay)
+    },
+    [address, autoApi, pairings, runAuto, setItems],
+  )
+
+  useEffect(() => {
+    onReviewedRef.current = onReviewed
+  }, [onReviewed])
+
   const setPaused = useCallback(
     async (on: boolean) => {
       if (demoRef.current) {
@@ -310,6 +510,8 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
         return
       }
       setPauseBusy(true)
+      pauseBusyRef.current = true
+      pauseTargetRef.current = on
       const failed: string[] = []
       await Promise.all(
         pairings.map(async (pairing) => {
@@ -323,6 +525,9 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
         }),
       )
       setPauseBusy(false)
+      pauseBusyRef.current = false
+      // A Pause the person asked for that did not reach every laptop still counts as "paused" here.
+      pauseTargetRef.current = failed.length === 0 ? null : on
       setPauseProblem(
         failed.length === 0
           ? null
@@ -397,14 +602,24 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       const relay = item ? relaysRef.current.get(item.pairingId) : undefined
       if (!relay || !address || !item || item.phase !== 'ready') return
       markWorking(id)
+      // Hold this payment's money back from auto-approve until it is done.
+      autoApi.reserve(id, item.review ? outflowLamports(item.review) : 0)
+      let maybeSent = false
 
       // Nod broadcasts by default (the wallet only signs): some wallets fail to send on devnet.
       const sendOnce: SignAndSend = async (transaction, minContextSlot) => {
         if (!ApprovalsConfig.walletSends) {
           const signed = await signTransaction(transaction)
+          maybeSent = true
           return chain.sendRaw(signed.serialize())
         }
-        return signAndSendTransaction(transaction, minContextSlot)
+        try {
+          return await signAndSendTransaction(transaction, minContextSlot)
+        } catch (error) {
+          // The wallet may have sent it before failing; only a login problem is known to be safe.
+          if (!/authoriz/i.test(String((error as Error)?.message ?? error))) maybeSent = true
+          throw error
+        }
       }
       // A wallet login that has gone stale fails with "authorization request failed".
       // Log in to the wallet again once, then retry.
@@ -418,10 +633,27 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
         }
       }
 
-      const outcome = await submitApproval({ request: item.request, walletAddress: address, chain, signAndSend, relay })
+      let outcome: Outcome
+      try {
+        outcome = await submitApproval({ request: item.request, walletAddress: address, chain, signAndSend, relay })
+      } finally {
+        autoApi.release(id)
+      }
+      settle(item, outcome, maybeSent)
       finish(item, outcome)
     },
-    [address, approveDemo, chain, connect, finish, markWorking, signAndSendTransaction, signTransaction],
+    [
+      address,
+      approveDemo,
+      autoApi,
+      chain,
+      connect,
+      finish,
+      markWorking,
+      settle,
+      signAndSendTransaction,
+      signTransaction,
+    ],
   )
 
   const reject = useCallback(
@@ -435,6 +667,26 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       finish(item, outcome)
     },
     [finish, markWorking, rejectDemo],
+  )
+
+  const autoView = autoStore.view
+  const auto = useMemo<AutoView>(
+    () => ({
+      loaded: autoView.loaded,
+      enabled: autoView.settings.enabled && autoView.settings.limitLamports > 0,
+      limitLamports: autoView.settings.limitLamports,
+      spentLamports: autoView.spentLamports,
+      remainingLamports: autoView.remainingLamports,
+      knownAddresses: autoView.known,
+      setEnabled: (on) => {
+        const current = autoApi.snapshot().settings
+        if (on && current.limitLamports <= 0) return
+        autoApi.setSettings({ ...current, enabled: on })
+      },
+      setLimit: (lamports) => autoApi.setSettings({ ...autoApi.snapshot().settings, limitLamports: lamports }),
+      forgetAddress: (address) => autoApi.forget(address),
+    }),
+    [autoApi, autoView],
   )
 
   const value = useMemo<ApprovalsValue>(
@@ -456,6 +708,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       pauseBusy,
       pauseProblem,
       setPaused,
+      auto,
     }),
     [
       address,
@@ -473,6 +726,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       pauseBusy,
       pauseProblem,
       setPaused,
+      auto,
     ],
   )
 

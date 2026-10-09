@@ -102,6 +102,16 @@ Add this to the agent's MCP config, with the real path:
 
 **Pause everything.** The switch at the top of the app's inbox makes the relay refuse every new request from your paired laptops with `423`. Each agent is told "paused all approvals … do not retry" instead of hanging or guessing, and `node agent/request.js` exits with code 3. Requests already waiting stay answerable. It lasts until you switch it off, including across a relay restart, and the switch only shows what the relay has confirmed: if a laptop cannot be reached, the app says so and offers to try again.
 
+**Daily limit and auto-approve.** In Settings, set a limit in SOL and switch on "Auto-approve small payments". Then a request skips Nod's card only if all of this is true, and otherwise it asks as usual:
+
+- it is a plain SOL transfer (one instruction, the System Program, one signer, nothing else in the transaction);
+- the recipient is an address you approved by hand before with no warning showing, and the payment went through (approving "Send anyway" over a warning teaches nothing);
+- the simulation succeeded and shows no warning, and the money that leaves the wallet is the transfer plus at most its fee;
+- it fits in what is left of today's limit. Every payment through Nod counts, approved by hand or automatically, with its network fee included (a payment that was signed but may not have landed counts in full, one that failed on chain counts only its fee). Today ends at local midnight;
+- "Pause everything" is off (and no pause is still on its way), and Nod is open on screen.
+
+The wallet still signs. Nod cannot tell in advance whether your wallet will show its own prompt; most do, so auto-approve skips Nod's card, not the wallet's. If the wallet cannot sign without you (login expired, prompt declined), nothing is sent and the normal card appears with a note. Auto-approved payments are marked "Auto-approved" in the inbox and on the result screen. The limit, the trusted addresses and the spending record live only on the phone, and an address can be forgotten in Settings.
+
 Then ask it: "send 0.001 SOL to <ADDRESS> on devnet". Tools: `get_wallet_address`, `request_transfer`, `request_transaction`.
 
 ## What the tests found that matters for the real build
