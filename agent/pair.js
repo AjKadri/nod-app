@@ -8,7 +8,7 @@
  *   node agent/pair.js --revoke         end the pairing from the laptop
  *
  * Options: --relay URL  --label NAME  --env (print RELAY_URL / RELAY_TOKEN lines)
- * Env:     RELAY_URL (default http://localhost:8787), RELAY_REGISTRATION_KEY
+ * Env:     RELAY_URL (default http://localhost:8787), RELAY_REGISTRATION_KEY (needed for a hosted relay)
  *
  * After the phone scans the code, the relay address and an agent key are saved in
  * ~/.nod/agent.json (override the folder with NOD_CONFIG_DIR). The MCP server and
@@ -93,6 +93,13 @@ async function main() {
     registrationKey: process.env.RELAY_REGISTRATION_KEY || "",
   }).catch((err) => {
     console.error(err.message);
+    if (/\(401\)/.test(err.message)) {
+      console.error(
+        process.env.RELAY_REGISTRATION_KEY
+          ? "The registration key was not accepted. Check it against the secret set on the relay."
+          : "This relay needs its registration key. Run again with RELAY_REGISTRATION_KEY=<key> in front of the command."
+      );
+    }
     process.exit(1);
   });
 

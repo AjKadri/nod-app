@@ -1,0 +1,11 @@
+{
+  "name": "nod-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Nod relay on its own, for the container image. Locally, run it from the repo root with npm run relay.",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}

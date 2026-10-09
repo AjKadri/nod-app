@@ -116,7 +116,9 @@ Then ask it: "send 0.001 SOL to <ADDRESS> on devnet". Tools: `get_wallet_address
 
 ## Security limits of this spike
 
-- Pairing: each laptop and phone get their own secret, stored on the relay only as a hash. Anyone without a pairing is refused, and one pairing cannot see another's requests. The relay still speaks plain HTTP locally; do not expose it to the internet until the hosted HTTPS relay (Task 3) exists, because the keys then travel unencrypted. The pairing code in the QR is a one-time password, so do not photograph it or share it.
+- Pairing: each laptop and phone get their own secret, stored on the relay only as a hash. Anyone without a pairing is refused, and one pairing cannot see another's requests. A relay on a public address refuses to start without `RELAY_REGISTRATION_KEY`, accepts only HTTPS, and saves pairings (hashes), push tokens and pending requests to disk so a restart does not unpair the phone. See `docs/hosting.md` to deploy it. The local relay (`npm run relay`) still speaks plain HTTP on localhost; never expose it as it is.
+- The Android release build no longer allows plain `http://` and the app refuses to pair with a non-HTTPS relay. For a local test of a release build, put an HTTPS tunnel in front of the relay (see `docs/hosting.md`); debug builds still accept a local `http://` relay.
+- The pairing code in the QR is a one-time password, so do not photograph it or share it.
 - A laptop whose pairing is revoked while offline learns about it on its next call. The phone treats a refused key as revoked and drops it.
 - `sim/.test-wallet.json` is a throwaway key for devnet or the local stand-in. Never fund it with real SOL.
 - The Mock MWA Wallet is a testing wallet. Never use it with real funds.

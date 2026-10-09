@@ -15,4 +15,5 @@ export function claimPairing(args: {
   link: string | PairingLink
   fetchImpl: unknown
   cryptoImpl?: { getRandomValues<T extends ArrayBufferView>(array: T): T }
+  allowInsecure?: boolean
 }): Promise<ClaimedPairing>

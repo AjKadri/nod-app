@@ -1,0 +1,39 @@
+# Fly.io config for the Nod relay. Deploy from the repo root:
+#   fly deploy --config deploy/fly.toml --dockerfile deploy/Dockerfile
+# Full steps, including the secrets you must set first, are in docs/hosting.md.
+
+app = "nod-relay-CHANGE-ME"   # must be unique on Fly; fly launch --no-deploy can pick one
+primary_region = "fra"        # pick the one nearest you: fly platform regions
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8787"
+  RELAY_STATE_FILE = "/data/relay-state.json"
+  # RELAY_REGISTRATION_KEY is a secret: fly secrets set RELAY_REGISTRATION_KEY=...
+
+[mounts]
+  source = "nod_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  # Phones hold a WebSocket open and the state lives in one file on one volume:
+  # keep exactly one machine, always on.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[deploy]
+  strategy = "immediate"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

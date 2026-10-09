@@ -567,14 +567,15 @@ test("relay: fires a push notification when a request arrives", async () => {
     await fetch(`${url}/requests`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ type: "transfer", to: newAddress(), lamports: 1, note: "pay the invoice" }),
+      body: JSON.stringify({ type: "transfer", to: newAddress(), lamports: 1, note: "pay the invoice", agent: "Research agent" }),
     })
   ).json();
 
   await waitFor(() => pushes.length === 1, { label: "push sent" });
   assert.equal(pushes[0].to, "ExponentPushToken[test]");
-  assert.equal(pushes[0].body, "pay the invoice");
-  assert.deepEqual(pushes[0].data, { requestId: created.id });
+  // The lock screen names the agent; it does not repeat the agent's own note.
+  assert.equal(pushes[0].body, "Research agent is waiting for your approval");
+  assert.deepEqual(pushes[0].data, { requestId: created.id, pairingId: pushPair.id });
   await pushy.close();
   await new Promise((resolve) => fakeExpo.close(resolve));
 });

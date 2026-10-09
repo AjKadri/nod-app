@@ -8,6 +8,7 @@ import { useTheme } from '@/components/theme-provider'
 import { Body, IconCircle, Label, NodButton } from '@/components/ui'
 import { radius, space } from '@/constants/theme'
 import { usePairings } from '@/features/pairing/pairing-provider'
+import { usePush } from '@/features/push/push-provider'
 
 type Phase =
   { name: 'scan' } | { name: 'working' } | { name: 'done'; label: string } | { name: 'error'; message: string }
@@ -17,6 +18,7 @@ export default function PairScreen() {
   const { tokens } = useTheme()
   const router = useRouter()
   const { pair } = usePairings()
+  const { enable: enablePush } = usePush()
   const [permission, requestPermission] = useCameraPermissions()
   const [phase, setPhase] = useState<Phase>({ name: 'scan' })
   const [typing, setTyping] = useState(false)
@@ -30,6 +32,8 @@ export default function PairScreen() {
     try {
       const stored = await pair(link)
       setPhase({ name: 'done', label: stored.label })
+      // Ask for notification permission now that there is a reason to. Never blocks pairing.
+      enablePush().catch(() => {})
     } catch (error) {
       setPhase({ name: 'error', message: error instanceof Error ? error.message : 'Pairing failed. Try again.' })
     }

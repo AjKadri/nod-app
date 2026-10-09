@@ -446,3 +446,20 @@ test("`pair.js` refuses plain http to a relay that is not on this machine", asyn
   assert.match(run.output, /plain http/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("the phone can refuse a relay that is not HTTPS before sending anything", async () => {
+  const created = await createPairing({ relay: url });
+  let called = false;
+  const spy = async () => {
+    called = true;
+    throw new Error("must not be called");
+  };
+  await assert.rejects(
+    claimPairing({ link: created.pairingUrl, fetchImpl: spy, allowInsecure: false }),
+    (err) => err instanceof PairingError && err.code === "insecure_relay",
+  );
+  assert.equal(called, false, "nothing may be sent to an http relay");
+  // The default stays permissive so the laptop tools and tests keep working locally.
+  const claimed = await claimPairing({ link: created.pairingUrl, fetchImpl: fetch });
+  assert.equal(claimed.id, created.id);
+});

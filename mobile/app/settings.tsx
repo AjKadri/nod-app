@@ -2,13 +2,14 @@ import { Ionicons } from '@expo/vector-icons'
 import { useMobileWallet } from '@wallet-ui/react-native-web3js'
 import { useRouter, type Href } from 'expo-router'
 import React, { useState } from 'react'
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { DetailRow, Eyebrow, Label, NodButton } from '@/components/ui'
 import { radius, space, type ThemePreference } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
 import { usePairings } from '@/features/pairing/pairing-provider'
+import { usePush } from '@/features/push/push-provider'
 import { useNetwork } from '@/features/network/use-network'
 import { shorten } from '@/utils/format'
 
@@ -26,6 +27,14 @@ const RELAY_LABEL = {
   revoked: 'Unpaired',
 } as const
 
+const PUSH_LABEL = {
+  unknown: 'Checking…',
+  ready: 'On',
+  'needs-permission': 'Off',
+  denied: 'Blocked in system settings',
+  unavailable: 'Not set up',
+} as const
+
 export default function SettingsScreen() {
   const { tokens, preference, setPreference } = useTheme()
   const router = useRouter()
@@ -33,6 +42,7 @@ export default function SettingsScreen() {
   const { networks, selectedNetwork, setSelectedNetwork } = useNetwork()
   const { pairingStatuses, demo, setDemo } = useApprovals()
   const { pairings, revoke } = usePairings()
+  const { status: pushStatus, enable: enablePush } = usePush()
   const [revokeNote, setRevokeNote] = useState<string | null>(null)
 
   function confirmRevoke(id: string, label: string) {
@@ -127,6 +137,27 @@ export default function SettingsScreen() {
             onPress={() => router.push('/pair' as Href)}
             style={styles.pairButton}
           />
+        </Section>
+
+        <Section title="Notifications">
+          <DetailRow label="Alerts when closed" value={PUSH_LABEL[pushStatus]} last />
+          {pushStatus === 'needs-permission' ? (
+            <NodButton title="Turn on" variant="secondary" onPress={() => enablePush()} style={styles.pairButton} />
+          ) : null}
+          {pushStatus === 'denied' ? (
+            <NodButton
+              title="Open system settings"
+              variant="secondary"
+              onPress={() => Linking.openSettings()}
+              style={styles.pairButton}
+            />
+          ) : null}
+          {pushStatus === 'unavailable' ? (
+            <Label style={styles.help}>
+              This build cannot receive notifications yet (it needs the Expo project and Firebase setup in
+              docs/hosting.md). Requests still arrive while Nod is open.
+            </Label>
+          ) : null}
         </Section>
 
         <Section title="Daily limit">

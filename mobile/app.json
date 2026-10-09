@@ -49,11 +49,10 @@
         }
       ],
       [
-        "expo-build-properties",
+        "expo-notifications",
         {
-          "android": {
-            "usesCleartextTraffic": true
-          }
+          "color": "#3E6B4D",
+          "defaultChannel": "approvals"
         }
       ]
     ],

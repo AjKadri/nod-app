@@ -72,7 +72,8 @@ export function PairingProvider({ children }: PropsWithChildren) {
 
   const pair = useCallback(
     async (link: string) => {
-      const claimed = await claimPairing({ link, fetchImpl: fetch })
+      // Release builds only pair over HTTPS; a debug build may use a local http relay.
+      const claimed = await claimPairing({ link, fetchImpl: fetch, allowInsecure: __DEV__ })
       const stored: StoredPairing = {
         id: claimed.id,
         relay: claimed.relay,

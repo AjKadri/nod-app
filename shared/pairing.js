@@ -78,9 +78,14 @@ function parsePairingUrl(text) {
 /**
  * Claim the pairing. Resolves with what the phone must keep:
  * { id, relay, label, key, token }. Throws PairingError with a message fit for the screen.
+ * `allowInsecure` (default true, for laptops and tests) lets a plain http:// relay through;
+ * the phone app passes false in release builds, because a pairing key sent over http can be read.
  */
-async function claimPairing({ link, fetchImpl, cryptoImpl }) {
+async function claimPairing({ link, fetchImpl, cryptoImpl, allowInsecure = true }) {
   const { relay, id, secret } = typeof link === "string" ? parsePairingUrl(link) : link;
+  if (!allowInsecure && !/^https:\/\//i.test(relay)) {
+    throw new PairingError("insecure_relay", "This relay does not use HTTPS, so Nod will not pair with it. Ask for an https:// address.");
+  }
   const key = randomKey(cryptoImpl);
   let response;
   try {

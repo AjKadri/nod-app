@@ -1,7 +1,8 @@
 "use strict";
 /**
- * Relay between agents and phones. Requests live in memory; pairings can be
- * saved to a file so they survive a restart.
+ * Relay between agents and phones. Pairings (as hashes), push tokens and
+ * requests are saved to one state file, so a restart or a redeploy neither
+ * unpairs the phone nor loses what is waiting for approval.
  *
  *   Agent  --POST /requests-->  relay  --WebSocket /phone-->  phone
  *   Agent  <--result (long-poll)--  relay  <--POST /requests/:id/result--  phone
@@ -31,9 +32,25 @@
  * The relay stores hashes, never the keys. Over plain HTTP a key can be read by
  * anyone on the network path: use HTTPS anywhere but localhost.
  *
+ * STATE FILE. Written after every change (to a temp file, flushed, then renamed
+ * over the old one), readable only by the relay's user (0600). It holds the
+ * SHA-256 hashes of the keys, never the keys, plus the phone's push token, its
+ * wallet address and the requests (including the transactions to sign, which are
+ * not secret). A file that cannot be parsed is moved aside, never overwritten.
+ * Resolved requests are kept for an hour so an agent that asks again still gets
+ * its answer. Run ONE relay per state file.
+ *
+ * HOSTED USE. A relay that listens on anything but localhost refuses to start
+ * without RELAY_REGISTRATION_KEY (24+ characters), so strangers cannot register
+ * pairings on it, and it refuses requests that did not arrive over HTTPS
+ * (the platform's proxy says so in X-Forwarded-Proto).
+ *
  * Run:  node relay/server.js
- * Env:  PORT, HOST, RELAY_PAIRINGS_FILE (default ./.relay-pairings.json),
- *       RELAY_REGISTRATION_KEY (if set, only holders can register pairings)
+ * Env:  PORT, HOST,
+ *       RELAY_STATE_FILE  (default ./.relay-pairings.json; RELAY_PAIRINGS_FILE still works),
+ *       RELAY_REGISTRATION_KEY  (required unless HOST is localhost),
+ *       RELAY_REQUIRE_HTTPS  (default 1 unless HOST is localhost; 0 turns it off),
+ *       EXPO_ACCESS_TOKEN  (optional, if the Expo push security setting is on)
  */
 const http = require("http");
 const fs = require("fs");
@@ -44,6 +61,11 @@ const { WebSocketServer } = require("ws");
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_WAIT_SECONDS = 120;
 const MAX_PENDING = 50;
+const MAX_PENDING_TOTAL = 500;
+const MAX_RESOLVED_KEPT = 100;
+const KEEP_RESOLVED_MS = 60 * 60 * 1000;
+const MIN_HOSTED_REGISTRATION_KEY = 24;
+const PUSH_TIMEOUT_MS = 8000;
 const MAX_PAIRINGS = 500;
 const MAX_UNCLAIMED_PAIRINGS = 50;
 const MAX_CLAIM_FAILURES = 5;
@@ -52,6 +74,8 @@ const FINAL_STATUSES = new Set(["approved", "denied", "failed"]);
 const ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const KEY_RE = /^[A-Za-z0-9_-]{32,128}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
+const REQUEST_ID_RE = /^[0-9a-f-]{36}$/;
+const REQUEST_STATUSES = new Set(["pending", "approved", "denied", "failed", "expired", "cancelled"]);
 
 // WebSocket close codes the phone understands.
 const REPLACED_CODE = 4000;
@@ -65,16 +89,36 @@ function sameHash(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+function isLoopback(host) {
+  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(String(host).toLowerCase());
+}
+
 function createRelay({
   port = 8787,
   host = "127.0.0.1",
   requestTtlMs = 10 * 60 * 1000,
   pairingTtlMs = 10 * 60 * 1000,
   pairingsFile = "",
+  stateFile = pairingsFile,
   registrationKey = "",
+  requireHttps = false,
+  publicStats = isLoopback(host),
   expoPushUrl = "https://exp.host/--/api/v2/push/send",
+  expoAccessToken = "",
   log = () => {},
 } = {}) {
+  const hosted = !isLoopback(host);
+  if (hosted) {
+    if (!registrationKey) {
+      throw new Error("RELAY_REGISTRATION_KEY is required when the relay listens on a public address, or anyone could register pairings on it.");
+    }
+    if (registrationKey.length < MIN_HOSTED_REGISTRATION_KEY) {
+      throw new Error(`RELAY_REGISTRATION_KEY must be at least ${MIN_HOSTED_REGISTRATION_KEY} characters on a public address.`);
+    }
+    if (!stateFile) {
+      throw new Error("RELAY_STATE_FILE is required when the relay listens on a public address, or a restart would unpair every phone.");
+    }
+  }
   /** @type {Map<string, any>} */
   const pairings = new Map();
   /** @type {Map<string, Set<Function>>} */
@@ -100,10 +144,55 @@ function createRelay({
     };
   }
 
+  let batchDepth = 0;
+  let dirty = false;
+
+  /** Run `work`, writing the state file once at the end instead of after every step. */
+  function batched(work) {
+    batchDepth += 1;
+    try {
+      return work();
+    } finally {
+      batchDepth -= 1;
+      if (batchDepth === 0 && dirty) save();
+    }
+  }
+
+  function serialiseRequest(request) {
+    return {
+      id: request.id,
+      status: request.status,
+      createdAt: request.createdAt,
+      expiresAt: request.expiresAt,
+      resolvedAt: request.resolvedAt || null,
+      payload: request.payload,
+      result: request.result,
+    };
+  }
+
+  /** Forget old answers: older than an hour, or beyond the newest 100. */
+  function prune(pairing) {
+    const now = Date.now();
+    const resolved = [...pairing.requests.values()].filter((r) => r.status !== "pending");
+    resolved.sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0));
+    resolved.forEach((request, index) => {
+      if (index >= MAX_RESOLVED_KEPT || now - (request.resolvedAt || 0) > KEEP_RESOLVED_MS) {
+        pairing.requests.delete(request.id);
+      }
+    });
+  }
+
+  /** Write the state file. Returns false (and logs) if it could not be written. */
   function save() {
-    if (!pairingsFile) return;
+    if (!stateFile) return true;
+    if (batchDepth > 0) {
+      dirty = true;
+      return true;
+    }
+    dirty = false;
+    for (const pairing of pairings.values()) prune(pairing);
     const data = {
-      version: 1,
+      version: 2,
       pairings: [...pairings.values()].map((p) => ({
         id: p.id,
         label: p.label,
@@ -115,32 +204,85 @@ function createRelay({
         claimExpiresAt: p.claimExpiresAt,
         walletAddress: p.walletAddress,
         pushToken: p.pushToken,
+        requests: [...p.requests.values()].map(serialiseRequest),
       })),
     };
+    const tmp = `${stateFile}.tmp`;
     try {
-      const tmp = `${pairingsFile}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-      fs.renameSync(tmp, pairingsFile);
+      fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+      const fd = fs.openSync(tmp, "w", 0o600);
+      try {
+        fs.writeSync(fd, JSON.stringify(data));
+        fs.fsyncSync(fd); // on disk before it replaces the old file
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(tmp, stateFile);
+      return true;
     } catch (err) {
-      log(`could not save pairings: ${err.message}`);
+      log(`could not save ${stateFile}: ${err.message}`);
+      return false;
     }
   }
 
-  function load() {
-    if (!pairingsFile || !fs.existsSync(pairingsFile)) return;
-    try {
-      const data = JSON.parse(fs.readFileSync(pairingsFile, "utf8"));
-      for (const entry of Array.isArray(data.pairings) ? data.pairings : []) {
-        if (!entry || !ID_RE.test(entry.id) || !HASH_RE.test(entry.agentKeyHash)) continue;
-        if (entry.phoneKeyHash && !HASH_RE.test(entry.phoneKeyHash)) continue;
-        pairings.set(entry.id, newPairing(entry));
-      }
-      log(`loaded ${pairings.size} pairing(s) from ${pairingsFile}`);
-    } catch (err) {
-      log(`could not read ${pairingsFile}: ${err.message}`);
+  function restoreRequest(pairing, entry) {
+    if (!entry || !REQUEST_ID_RE.test(String(entry.id)) || !REQUEST_STATUSES.has(entry.status)) return;
+    if (!entry.payload || typeof entry.payload !== "object") return;
+    if (!Number.isFinite(entry.createdAt) || !Number.isFinite(entry.expiresAt)) return;
+    const request = {
+      id: entry.id,
+      pairingId: pairing.id,
+      status: entry.status,
+      createdAt: entry.createdAt,
+      expiresAt: entry.expiresAt,
+      payload: entry.payload,
+      result: entry.result || null,
+      resolvedAt: entry.resolvedAt || undefined,
+      timer: null,
+    };
+    if (request.status === "pending" && Date.now() >= request.expiresAt) {
+      // It ran out while the relay was down.
+      request.status = "expired";
+      request.result = { reason: "No answer in time" };
+      request.resolvedAt = request.expiresAt;
     }
+    if (request.status === "pending") armRequest(pairing, request);
+    pairing.requests.set(request.id, request);
+  }
+
+  function load() {
+    if (!stateFile || !fs.existsSync(stateFile)) return;
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    } catch (err) {
+      // Never overwrite what we cannot read: keep it for a human and start empty.
+      const aside = `${stateFile}.corrupt-${Date.now()}`;
+      try {
+        fs.renameSync(stateFile, aside);
+        log(`could not read ${stateFile} (${err.message}); moved it to ${aside} and started empty`);
+      } catch (moveErr) {
+        throw new Error(`State file ${stateFile} is unreadable and could not be moved aside: ${moveErr.message}`);
+      }
+      return;
+    }
+    let restoredRequests = 0;
+    for (const entry of Array.isArray(data.pairings) ? data.pairings : []) {
+      if (!entry || !ID_RE.test(entry.id) || !HASH_RE.test(entry.agentKeyHash)) continue;
+      if (entry.phoneKeyHash && !HASH_RE.test(entry.phoneKeyHash)) continue;
+      if (entry.claimHash && !HASH_RE.test(entry.claimHash)) continue;
+      if (entry.state === "active" && !entry.phoneKeyHash) continue; // cannot be right
+      const pairing = newPairing(entry);
+      pairings.set(pairing.id, pairing);
+      for (const requestEntry of Array.isArray(entry.requests) ? entry.requests : []) {
+        restoreRequest(pairing, requestEntry);
+      }
+      restoredRequests += pairing.requests.size;
+    }
+    log(`loaded ${pairings.size} pairing(s) and ${restoredRequests} request(s) from ${stateFile}`);
   }
   load();
+  if (hosted && !save()) throw new Error(`Cannot write the state file ${stateFile}. Is the volume mounted and writable?`);
 
   /** The pairing, unless it was never claimed in time (then it is dropped). */
   function livePairing(id) {
@@ -190,7 +332,17 @@ function createRelay({
     }
     broadcast(pairing, { kind: "resolved", id: request.id, status });
     log(`request ${request.id} -> ${status}`);
+    save();
     return true;
+  }
+
+  /** Start the clock that expires a pending request. */
+  function armRequest(pairing, request) {
+    request.timer = setTimeout(
+      () => settle(pairing, request, "expired", { reason: "No answer in time" }),
+      Math.max(0, request.expiresAt - Date.now())
+    );
+    if (request.timer.unref) request.timer.unref();
   }
 
   function waitFor(request, seconds) {
@@ -210,24 +362,47 @@ function createRelay({
     });
   }
 
+  /**
+   * Tell the phone something is waiting. The text names the agent only: the agent
+   * writes the note, and a note can lie (that is what the card is for), so it is
+   * never repeated on the lock screen. Tapping opens the card for this request.
+   */
   async function sendPush(pairing, request) {
-    if (!pairing.pushToken) return;
-    const body = {
-      to: pairing.pushToken,
+    const token = pairing.pushToken;
+    if (!token) return;
+    const agent = typeof request.payload.agent === "string" ? request.payload.agent.replace(/\s+/g, " ").trim().slice(0, 40) : "";
+    const message = {
+      to: token,
       title: "Approval needed",
-      body:
-        request.payload.note ||
-        `An agent is asking to ${request.payload.type === "transfer" ? "send SOL" : "run a transaction"}`,
-      data: { requestId: request.id },
+      body: agent ? `${agent} is waiting for your approval` : "An agent is waiting for your approval",
+      data: { requestId: request.id, pairingId: pairing.id },
+      sound: "default",
       priority: "high",
       channelId: "approvals",
+      // Do not deliver a stale push after the request has run out.
+      ttl: Math.max(30, Math.floor((request.expiresAt - Date.now()) / 1000)),
     };
+    const headers = { "content-type": "application/json", accept: "application/json" };
+    if (expoAccessToken) headers.authorization = `Bearer ${expoAccessToken}`;
     try {
-      await fetch(expoPushUrl, {
+      const response = await fetch(expoPushUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        headers,
+        body: JSON.stringify(message),
+        signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
       });
+      const body = await response.json().catch(() => ({}));
+      const ticket = body && body.data && !Array.isArray(body.data) ? body.data : null;
+      if (ticket && ticket.status === "error") {
+        log(`push refused for ${pairing.id}: ${ticket.message || ticket.details?.error || "unknown"}`);
+        // The app was uninstalled or the token is dead: stop sending to it.
+        if (ticket.details && ticket.details.error === "DeviceNotRegistered" && pairing.pushToken === token) {
+          pairing.pushToken = null;
+          save();
+        }
+      } else if (!response.ok) {
+        log(`push failed: Expo answered ${response.status}`);
+      }
     } catch (err) {
       log(`push failed: ${err.message}`);
     }
@@ -235,11 +410,13 @@ function createRelay({
 
   /** Remove a pairing: cancel what is waiting, drop the phone, forget the keys. */
   function revoke(pairing, reason) {
-    for (const request of pairing.requests.values()) settle(pairing, request, "cancelled", { reason });
-    pairings.delete(pairing.id);
-    for (const phone of pairing.phones) phone.close(REVOKED_CODE, "pairing revoked");
-    pairing.phones.clear();
-    save();
+    batched(() => {
+      for (const request of pairing.requests.values()) settle(pairing, request, "cancelled", { reason });
+      pairings.delete(pairing.id);
+      for (const phone of pairing.phones) phone.close(REVOKED_CODE, "pairing revoked");
+      pairing.phones.clear();
+      save();
+    });
     log(`pairing ${pairing.id} revoked`);
   }
 
@@ -309,6 +486,13 @@ function createRelay({
     return typeof provided === "string" && sameHash(sha256(provided), sha256(registrationKey));
   }
 
+  /** Behind the host's proxy, X-Forwarded-Proto says how the caller really connected. */
+  function httpsOk(req) {
+    if (!requireHttps) return true;
+    const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+    return proto === "https";
+  }
+
   function clampWait(value) {
     const seconds = Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) return 0;
@@ -325,7 +509,11 @@ function createRelay({
     const route = url.pathname.replace(/\/+$/, "") || "/";
 
     if (req.method === "GET" && route === "/health") {
-      return send(res, 200, { ok: true, phones: totalPhones(), pending: totalPending() });
+      return send(res, 200, publicStats ? { ok: true, phones: totalPhones(), pending: totalPending() } : { ok: true });
+    }
+
+    if (!httpsOk(req)) {
+      return send(res, 403, { error: "This relay only accepts HTTPS. Use its https:// address." });
     }
 
     // ---- pairing: the only calls that need no key
@@ -441,7 +629,7 @@ function createRelay({
       if (!payload || (payload.type !== "transfer" && payload.type !== "raw")) {
         return send(res, 400, { error: 'type must be "transfer" or "raw"' });
       }
-      if (pendingList(pairing).length >= MAX_PENDING) {
+      if (pendingList(pairing).length >= MAX_PENDING || totalPending() >= MAX_PENDING_TOTAL) {
         return send(res, 429, { error: "Too many requests are already waiting" });
       }
       const now = Date.now();
@@ -455,12 +643,9 @@ function createRelay({
         result: null,
         timer: null,
       };
-      request.timer = setTimeout(
-        () => settle(pairing, request, "expired", { reason: "No answer in time" }),
-        requestTtlMs
-      );
-      if (request.timer.unref) request.timer.unref();
+      armRequest(pairing, request);
       pairing.requests.set(request.id, request);
+      save();
       log(`request ${request.id} created (${payload.type}), phones online: ${pairing.phones.size}`);
       broadcast(pairing, { kind: "request", request: publicView(request) });
       sendPush(pairing, request);
@@ -527,6 +712,11 @@ function createRelay({
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url, "http://relay.local");
+    if (!httpsOk(req)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     const caller = url.pathname === "/phone" ? authenticate(req) : null;
     if (!caller) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
@@ -584,6 +774,7 @@ function createRelay({
       });
     },
     close() {
+      save(); // leave the file complete, whatever happened since the last write
       for (const pairing of pairings.values()) {
         for (const request of pairing.requests.values()) if (request.timer) clearTimeout(request.timer);
         for (const phone of pairing.phones) phone.terminate();
@@ -597,29 +788,49 @@ function createRelay({
 if (require.main === module) {
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || "127.0.0.1";
-  const pairingsFile = process.env.RELAY_PAIRINGS_FILE || path.join(process.cwd(), ".relay-pairings.json");
+  const hosted = !isLoopback(host);
+  const stateFile =
+    process.env.RELAY_STATE_FILE ||
+    process.env.RELAY_PAIRINGS_FILE ||
+    path.join(process.cwd(), ".relay-pairings.json");
   const registrationKey = process.env.RELAY_REGISTRATION_KEY || "";
-  const relay = createRelay({
-    port,
-    host,
-    pairingsFile,
-    registrationKey,
-    log: (line) => console.log(`[relay] ${line}`),
-  });
+  const requireHttps = process.env.RELAY_REQUIRE_HTTPS ? process.env.RELAY_REQUIRE_HTTPS === "1" : hosted;
+  const log = (line) => console.log(`[relay] ${line}`);
+
+  let relay;
+  try {
+    relay = createRelay({
+      port,
+      host,
+      stateFile,
+      registrationKey,
+      requireHttps,
+      expoAccessToken: process.env.EXPO_ACCESS_TOKEN || "",
+      log,
+    });
+  } catch (err) {
+    console.error(`[relay] could not start: ${err.message}`);
+    process.exit(1);
+  }
   relay
     .listen()
     .then(({ url }) => {
-      console.log(`[relay] listening on ${url}`);
-      console.log(`[relay] pairings are saved in ${pairingsFile}`);
-      if (host !== "127.0.0.1" && host !== "localhost") {
-        console.log("[relay] reachable from the network: serve it over HTTPS, because pairing keys travel in headers.");
-        if (!registrationKey) console.log("[relay] tip: set RELAY_REGISTRATION_KEY so only you can create pairings.");
-      }
+      log(`listening on ${url}`);
+      log(`state is saved in ${stateFile}`);
+      if (hosted) log(`public mode: registration key required, HTTPS ${requireHttps ? "required" : "NOT required"}`);
     })
     .catch((err) => {
       console.error(`[relay] could not start: ${err.message}`);
       process.exit(1);
     });
+
+  // Hosts stop a machine with SIGTERM when they redeploy. Finish writing, then go.
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => {
+      log(`${signal}: saving and shutting down`);
+      relay.close().finally(() => process.exit(0));
+    });
+  }
 }
 
 module.exports = { createRelay };
