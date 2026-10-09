@@ -49,7 +49,8 @@
  * Env:  PORT, HOST,
  *       RELAY_STATE_FILE  (default ./.relay-pairings.json; RELAY_PAIRINGS_FILE still works),
  *       RELAY_REGISTRATION_KEY  (required unless HOST is localhost),
- *       RELAY_REQUIRE_HTTPS  (default 1 unless HOST is localhost; 0 turns it off),
+ *       RELAY_REQUIRE_HTTPS  (default 1 unless HOST is localhost; 0 turns it off). Setting it to 1
+ *                            behind a reverse proxy on localhost also makes /health tell nothing but ok.
  *       EXPO_ACCESS_TOKEN  (optional, if the Expo push security setting is on)
  */
 const http = require("http");
@@ -102,7 +103,8 @@ function createRelay({
   stateFile = pairingsFile,
   registrationKey = "",
   requireHttps = false,
-  publicStats = isLoopback(host),
+  // Behind a proxy that makes the relay public (HTTPS required), stay quiet even if it listens on localhost.
+  publicStats = isLoopback(host) && !requireHttps,
   expoPushUrl = "https://exp.host/--/api/v2/push/send",
   expoAccessToken = "",
   log = () => {},
@@ -817,7 +819,7 @@ if (require.main === module) {
     .then(({ url }) => {
       log(`listening on ${url}`);
       log(`state is saved in ${stateFile}`);
-      if (hosted) log(`public mode: registration key required, HTTPS ${requireHttps ? "required" : "NOT required"}`);
+      if (hosted || requireHttps) log(`public mode: ${hosted ? "registration key required, " : ""}HTTPS ${requireHttps ? "required" : "NOT required"}, /health shows nothing but ok`);
     })
     .catch((err) => {
       console.error(`[relay] could not start: ${err.message}`);

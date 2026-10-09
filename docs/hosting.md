@@ -9,7 +9,7 @@ The relay is a small Node server. Agents and phones both talk to it, so for a ph
 - It will not start on a public address without `RELAY_REGISTRATION_KEY` (24 characters or more). Without it anyone could create pairings on your relay.
 - It will not start without a place to keep its state (`RELAY_STATE_FILE`) that it can write to.
 - On a public address it only accepts requests that came in over HTTPS (the host's proxy reports this in `X-Forwarded-Proto`), because pairing keys travel in headers.
-- Its `/health` page returns only `{"ok":true}` when public.
+- Its `/health` page returns only `{"ok":true}` when public (or when `RELAY_REQUIRE_HTTPS=1`).
 
 ## What it keeps on disk
 
@@ -45,6 +45,29 @@ RELAY_REGISTRATION_KEY="$KEY" npm run pair -- --relay https://<your-app-name>.fl
 
 Scan the QR code in the app. Check that it survives a restart: `fly machine restart <id>`, then `npm run pair -- --status` should still say the phone is paired.
 
+## VPS (Hetzner/Ubuntu)
+
+One small server (a Hetzner CX22 is plenty; any Ubuntu 22.04/24.04 or Debian machine works) with a script that installs everything: Node 22, the relay as a service that restarts on its own, Caddy for HTTPS with an automatic certificate, and a firewall that allows only SSH, HTTP and HTTPS. The relay listens on `127.0.0.1` behind Caddy, requires HTTPS, and keeps its state in `/var/lib/nod`.
+
+1. **Point a name at the server.** Create an **A record** for a name you own (for example `relay.example.com`) pointing to the server's IPv4 address. No domain? Use `<ip>.sslip.io`: for a server at `203.0.113.7` the name is `203.0.113.7.sslip.io`, and it already points at that address. (sslip.io is a shared free service, so its certificates can hit rate limits; use your own domain for anything lasting.)
+2. **Copy the script over:**
+   ```bash
+   scp deploy/vps/setup.sh root@<server-ip>:
+   ```
+3. **Run it on the server** (the first argument is the name from step 1):
+   ```bash
+   ssh root@<server-ip>
+   sudo bash setup.sh relay.example.com
+   ```
+   It checks that the name points at this server, installs and starts everything, then prints the relay address and a freshly generated **registration key**. Copy the key somewhere safe; it is also in `/etc/nod/relay.env` (root only).
+4. **Check and pair** from your computer:
+   ```bash
+   curl https://relay.example.com/health        # {"ok":true}
+   RELAY_REGISTRATION_KEY=<key> npm run pair -- --relay https://relay.example.com
+   ```
+
+To update the relay later, pull the new code, copy `setup.sh` over again and re-run the same command. It replaces the relay, keeps the key and every pairing, and restarts the service. `setup.sh` carries its own copy of `relay/`: `node scripts/vps-bundle.js` refreshes that copy after you change the relay (`npm test` fails if it is out of date). Logs: `journalctl -u nod-relay -f` and `journalctl -u caddy -n 50`.
+
 ## Settings
 
 | Variable | Meaning |
@@ -52,7 +75,7 @@ Scan the QR code in the app. Check that it survives a restart: `fly machine rest
 | `RELAY_REGISTRATION_KEY` | Secret. Required when `HOST` is not localhost. 24+ characters. |
 | `RELAY_STATE_FILE` | Where state is kept. The image uses `/data/relay-state.json` (the volume). |
 | `HOST`, `PORT` | `0.0.0.0` and `8787` in the image. |
-| `RELAY_REQUIRE_HTTPS` | On by default for a public address. `0` turns it off (do not). |
+| `RELAY_REQUIRE_HTTPS` | On by default for a public address. `0` turns it off (do not). Set to `1` behind a proxy on localhost (as the VPS script does) and `/health` also shows nothing but `ok`. |
 | `EXPO_ACCESS_TOKEN` | Optional secret, only if you turn on "enhanced push security" in your Expo account. |
 
 ## Push notifications (needs you, once)
@@ -61,6 +84,8 @@ The relay sends a push through Expo when a request arrives. The phone side is bu
 
 1. A free Expo account and an EAS project: in `mobile/`, run `npx eas-cli login` then `npx eas-cli init`. This writes the project id into `app.json` (`extra.eas.projectId`). Without it the app skips push and says so in Settings.
 2. A Firebase project with an Android app whose package name is `com.ajkadri.nod`. Download its `google-services.json` into `mobile/` (it is git-ignored), then upload the FCM credential to Expo: `npx eas-cli credentials` → Android → Google Service Account Key for push notifications.
+
+**Builds from GitHub Actions.** The workflow in `.github/workflows/build.yml` builds the APK. To include push, add the contents of `google-services.json` as a repository secret named `GOOGLE_SERVICES_JSON` (Settings → Secrets and variables → Actions → New repository secret). When the secret exists the workflow writes it to `mobile/google-services.json` before building, and stops with a clear message if it is not valid JSON or is not for the package `com.ajkadri.nod`. Without the secret it builds as before, without push. (The project id from step 1 must be committed in `mobile/app.json`, since it is not secret.)
 
 Then build the app (a development or release build; push does not work in Expo Go) and install it. The notification says which agent is waiting, never the amount or the agent's note, and tapping it opens that request.
 

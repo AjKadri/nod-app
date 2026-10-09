@@ -42,6 +42,25 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci
       - run: npx tsc --noEmit
+      - name: Add the Firebase config (push notifications), if the secret exists
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "No GOOGLE_SERVICES_JSON secret: building without push (Settings will say Not set up)."
+            exit 0
+          fi
+          printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json
+          # Fail early, without printing the file, if it is the wrong thing.
+          node -e '
+            const fs = require("fs");
+            let data;
+            try { data = JSON.parse(fs.readFileSync("google-services.json", "utf8")); }
+            catch { console.error("::error::GOOGLE_SERVICES_JSON is not valid JSON"); process.exit(1); }
+            const names = (data.client || []).map((c) => c.client_info && c.client_info.android_client_info && c.client_info.android_client_info.package_name);
+            if (!names.includes("com.ajkadri.nod")) { console.error("::error::GOOGLE_SERVICES_JSON has no Android app with package name com.ajkadri.nod"); process.exit(1); }
+          ' || { rm -f google-services.json; exit 1; }
+          echo "google-services.json written; the build will include push."
       - name: Generate the Android project
         run: npx expo prebuild --platform android --no-install
       - name: Build release APK (arm64)

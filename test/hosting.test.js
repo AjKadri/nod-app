@@ -9,6 +9,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const WebSocket = require("ws");
 
 const { createRelay } = require("../relay/server");
@@ -331,6 +332,49 @@ test("with HTTPS required, the phone socket needs it too", async () => {
 test("a public relay does not tell strangers how busy it is", async () => {
   const { url } = await start({ publicStats: false });
   assert.deepEqual(await (await fetch(`${url}/health`)).json(), { ok: true });
+});
+
+test("behind a proxy on localhost, requiring HTTPS makes the relay public too: /health says nothing but ok", async () => {
+  const proxied = await start({ host: "127.0.0.1", requireHttps: true });
+  assert.deepEqual(await (await fetch(`${proxied.url}/health`)).json(), { ok: true });
+  // On plain localhost development keeps its numbers.
+  const local = await start({ host: "127.0.0.1" });
+  assert.deepEqual(Object.keys(await (await fetch(`${local.url}/health`)).json()).sort(), ["ok", "pending", "phones"]);
+});
+
+test("the server started with RELAY_REQUIRE_HTTPS=1 on 127.0.0.1 (the VPS setup) answers /health with only ok", async () => {
+  const child = spawn(process.execPath, [path.join(__dirname, "..", "relay", "server.js")], {
+    env: {
+      PATH: process.env.PATH,
+      HOST: "127.0.0.1",
+      PORT: "0",
+      RELAY_REQUIRE_HTTPS: "1",
+      RELAY_STATE_FILE: tempFile(),
+    },
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  cleanups.push(async () => {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+  });
+  let output = "";
+  const base = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`relay did not start: ${output}`)), 5000);
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      const match = output.match(/listening on (http:\/\/\S+)/);
+      if (match) {
+        clearTimeout(timer);
+        resolve(match[1]);
+      }
+    });
+    child.once("exit", () => reject(new Error(`relay exited: ${output}`)));
+  });
+  assert.deepEqual(await (await fetch(`${base}/health`)).json(), { ok: true });
+  assert.match(output, /public mode/);
+  // And it really does require HTTPS: the proxy header is what proves it.
+  const plain = await fetch(`${base}/pairings`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  assert.equal(plain.status, 403);
 });
 
 // ---------------------------------------------------------------- push
