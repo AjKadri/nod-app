@@ -11,6 +11,7 @@
  *     onRequest: (request) => ...,     // a new approval request arrived
  *     onResolved: (id, status) => ..., // a request was answered or expired
  *     onStatus: (status) => ...,       // "connecting" | "online" | "offline" | "replaced" | "revoked"
+ *     onPaused: (paused) => ...,       // the relay's "Pause everything" state, on connect and whenever it changes
  *   });
  *   client.setWallet(address);
  *   await client.sendResult(id, { status: "approved", signature });
@@ -32,6 +33,7 @@ function createRelayClient({
   onRequest = () => {},
   onResolved = () => {},
   onStatus = () => {},
+  onPaused = () => {},
   reconnectMs = 2000,
 }) {
   if (!baseUrl) throw new Error("baseUrl is required");
@@ -81,7 +83,10 @@ function createRelayClient({
         return;
       }
       if (message.kind === "pending" && Array.isArray(message.requests)) {
+        if (typeof message.paused === "boolean") onPaused(message.paused);
         message.requests.forEach(deliver);
+      } else if (message.kind === "paused" && typeof message.paused === "boolean") {
+        onPaused(message.paused);
       } else if (message.kind === "request") {
         deliver(message.request);
       } else if (message.kind === "resolved" && typeof message.id === "string") {
@@ -153,6 +158,22 @@ function createRelayClient({
         throw new Error(`Relay rejected the result (${response.status}): ${text}`);
       }
       return response.json();
+    },
+
+    /**
+     * "Pause everything": make the relay refuse new requests from this pairing's laptop (or accept
+     * them again). Resolves with the state the relay now has, so the caller never has to assume.
+     */
+    async setPaused(paused) {
+      const response = await fetchImpl(`${httpBase}/pause`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ paused: !!paused }),
+      });
+      if (!response.ok) throw new Error(`Relay refused to ${paused ? "pause" : "resume"} (${response.status})`);
+      const body = await response.json();
+      onPaused(body.paused === true);
+      return body.paused === true;
     },
 
     /** Fallback for when the socket is down: ask for everything still waiting. */

@@ -10,7 +10,8 @@
  *   request_transaction  ask the phone to sign and send a transaction the agent built
  *
  * Setup: run `node agent/pair.js` once. The pairing it saves is used automatically.
- * Env (optional): RELAY_URL, RELAY_TOKEN, AGENT_NAME, APPROVAL_TIMEOUT_SECONDS
+ * Env (optional): RELAY_URL, RELAY_TOKEN, AGENT_NAME (shown on the phone), AGENT_ICON (a preset name such as
+ *   code, terminal, sparkles, chat, search, globe, flash, cube, or one emoji), APPROVAL_TIMEOUT_SECONDS
  *
  * Example client config:
  *   { "mcpServers": { "phone-approvals": { "command": "node",
@@ -26,6 +27,9 @@ const { resolveAgentConnection } = require("./credentials");
 // RELAY_URL / RELAY_TOKEN, or else the pairing saved by `node agent/pair.js`.
 const { relay, token } = resolveAgentConnection();
 const agentName = (process.env.AGENT_NAME || "mcp-agent").slice(0, 60);
+const agentIcon = (process.env.AGENT_ICON || "").trim().slice(0, 32);
+// Who is asking, as the phone will show it.
+const identity = { agent: agentName, ...(agentIcon ? { agentIcon } : {}) };
 const timeoutMs = Number(process.env.APPROVAL_TIMEOUT_SECONDS || 300) * 1000;
 
 const TOOLS = [
@@ -107,7 +111,7 @@ async function callTool(name, args) {
       to: args.to,
       lamports: Math.round(sol * 1_000_000_000),
       note: typeof args.note === "string" ? args.note : "",
-      agent: agentName,
+      ...identity,
     };
     return describeOutcome(await requestApproval({ relay, token, payload, timeoutMs }));
   }
@@ -120,7 +124,7 @@ async function callTool(name, args) {
       type: "raw",
       transactionBase64: args.transactionBase64,
       note: typeof args.note === "string" ? args.note : "",
-      agent: agentName,
+      ...identity,
     };
     return describeOutcome(await requestApproval({ relay, token, payload, timeoutMs }));
   }
@@ -135,6 +139,7 @@ async function main() {
     try {
       return await callTool(request.params.name, request.params.arguments || {});
     } catch (err) {
+      if (err && err.code === "paused") return text(`PAUSED: ${err.message}`, true);
       return text(`Could not reach the approval relay at ${relay}: ${err.message}`, true);
     }
   });

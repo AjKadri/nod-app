@@ -5,11 +5,14 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import Animated, { LinearTransition, SlideInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { DemoPill, Eyebrow, Label, NetworkPill, NodButton, useNow, Wordmark } from '@/components/ui'
+import { AgentMark, DemoPill, Eyebrow, Label, NetworkPill, NodButton, useNow, Wordmark } from '@/components/ui'
 import { radius, space } from '@/constants/theme'
 import { usePairings } from '@/features/pairing/pairing-provider'
 import { useNetwork } from '@/features/network/use-network'
 import { useApprovals, type HistoryEntry, type Item } from '@/features/approvals/approvals-provider'
+import { describeAgent } from '@/features/approvals/lib/agent'
+import { groupByDay } from '@/features/approvals/lib/group'
+import { PauseBar } from './pause-bar'
 import { timeAgo } from '@/utils/format'
 
 export function InboxScreen() {
@@ -38,6 +41,8 @@ export function InboxScreen() {
           </Pressable>
         </View>
       </View>
+
+      <PauseBar />
 
       <ScrollView contentContainerStyle={styles.content}>
         {notice ? (
@@ -85,14 +90,18 @@ export function InboxScreen() {
           ))
         )}
 
-        {history.length > 0 ? <Eyebrow>Recent</Eyebrow> : null}
-        {history.map((entry) => (
-          <HistoryRow
-            key={entry.id}
-            entry={entry}
-            now={now}
-            onPress={() => router.push(`/result/${entry.id}` as Href)}
-          />
+        {groupByDay(history, now, (entry) => entry.at).map((group) => (
+          <React.Fragment key={group.label}>
+            <Eyebrow>{group.label}</Eyebrow>
+            {group.entries.map((entry) => (
+              <HistoryRow
+                key={entry.id}
+                entry={entry}
+                now={now}
+                onPress={() => router.push(`/result/${entry.id}` as Href)}
+              />
+            ))}
+          </React.Fragment>
         ))}
       </ScrollView>
     </SafeAreaView>
@@ -102,8 +111,8 @@ export function InboxScreen() {
 function PendingRow({ item, now, onPress }: { item: Item; now: number; onPress: () => void }) {
   const { tokens } = useTheme()
   const presented = item.presented
-  const payload = (item.request.payload ?? {}) as { agent?: string }
-  const agent = payload.agent || 'Unnamed agent'
+  const who = describeAgent(item.request.payload)
+  const agent = who.name
   const summary = presented ? presented.headline : 'Checking this request…'
   return (
     <Pressable
@@ -115,7 +124,7 @@ function PendingRow({ item, now, onPress }: { item: Item; now: number; onPress: 
         { backgroundColor: tokens.surface, borderColor: tokens.line, opacity: pressed ? 0.85 : 1 },
       ]}
     >
-      <Ionicons name="laptop-outline" size={24} color={tokens.text} />
+      <AgentMark icon={who.icon} />
       <View style={styles.rowText}>
         <Text style={{ color: tokens.text, fontSize: 16, fontWeight: '600' }} numberOfLines={1}>
           {agent}
@@ -153,12 +162,15 @@ function HistoryRow({ entry, now, onPress }: { entry: HistoryEntry; now: number;
       onPress={onPress}
       style={({ pressed }) => [styles.historyRow, { borderBottomColor: tokens.line, opacity: pressed ? 0.7 : 1 }]}
     >
-      <Ionicons name={meta.icon} size={24} color={color} />
+      <AgentMark icon={entry.agentIcon} />
       <View style={styles.rowText}>
         <Text style={{ color: tokens.text, fontSize: 16 }} numberOfLines={1}>
           {entry.agent}
         </Text>
-        <Text style={{ color, fontSize: 13 }}>{meta.label}</Text>
+        <View style={styles.statusLine}>
+          <Ionicons name={meta.icon} size={14} color={color} />
+          <Text style={{ color, fontSize: 13 }}>{meta.label}</Text>
+        </View>
       </View>
       <View style={styles.rowEnd}>
         {entry.amount ? (
@@ -195,6 +207,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   rowText: { flex: 1, gap: 2 },
+  statusLine: { alignItems: 'center', flexDirection: 'row', gap: 4 },
   rowEnd: { alignItems: 'flex-end', gap: 2 },
   historyRow: {
     alignItems: 'center',

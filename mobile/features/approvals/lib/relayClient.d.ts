@@ -19,6 +19,7 @@ export type RelayClient = {
   setWallet(address: string): void
   sendResult(id: string, result: RelayResult): Promise<unknown>
   fetchPending(): Promise<RelayRequest[]>
+  setPaused(paused: boolean): Promise<boolean>
   close(): void
 }
 
@@ -30,5 +31,6 @@ export function createRelayClient(options: {
   onRequest?: (request: RelayRequest) => void
   onResolved?: (id: string, status: string) => void
   onStatus?: (status: RelayStatus) => void
+  onPaused?: (paused: boolean) => void
   reconnectMs?: number
 }): RelayClient

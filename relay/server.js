@@ -67,6 +67,10 @@ const MAX_RESOLVED_KEPT = 100;
 const KEEP_RESOLVED_MS = 60 * 60 * 1000;
 const MIN_HOSTED_REGISTRATION_KEY = 24;
 const PUSH_TIMEOUT_MS = 8000;
+const MAX_AGENT_NAME = 60;
+const MAX_AGENT_ICON = 32;
+const PAUSED_MESSAGE =
+  "The user has paused all approvals in the Nod app, so nothing was sent. Do not retry until they turn Pause off.";
 const MAX_PAIRINGS = 500;
 const MAX_UNCLAIMED_PAIRINGS = 50;
 const MAX_CLAIM_FAILURES = 5;
@@ -141,6 +145,7 @@ function createRelay({
       claimFailures: 0,
       walletAddress: base.walletAddress || null,
       pushToken: base.pushToken || null,
+      paused: base.paused === true,
       requests: new Map(),
       phones: new Set(),
     };
@@ -206,6 +211,7 @@ function createRelay({
         claimExpiresAt: p.claimExpiresAt,
         walletAddress: p.walletAddress,
         pushToken: p.pushToken,
+        paused: p.paused,
         requests: [...p.requests.values()].map(serialiseRequest),
       })),
     };
@@ -596,6 +602,7 @@ function createRelay({
         role,
         state: pairing.state,
         phoneOnline: pairing.phones.size > 0,
+        paused: pairing.paused,
         ...(pairing.state === "pending" ? { claimExpiresAt: pairing.claimExpiresAt } : {}),
       });
     }
@@ -625,12 +632,33 @@ function createRelay({
       return send(res, 200, { ok: true });
     }
 
+    // "Pause everything": the phone's emergency stop. Only the phone can flip it, and it lasts
+    // (and survives a restart) until the phone turns it off. Requests already waiting stay
+    // answerable; new ones are refused with 423.
+    if (req.method === "POST" && route === "/pause") {
+      if (!only("phone")) return;
+      const body = await readJson(req);
+      if (typeof body.paused !== "boolean") return send(res, 400, { error: "paused must be true or false" });
+      if (pairing.paused !== body.paused) {
+        pairing.paused = body.paused;
+        save();
+        broadcast(pairing, { kind: "paused", paused: pairing.paused });
+        log(`pairing ${pairing.id} ${pairing.paused ? "paused" : "resumed"}`);
+      }
+      return send(res, 200, { paused: pairing.paused });
+    }
+
     if (req.method === "POST" && route === "/requests") {
       if (!only("agent")) return;
       const payload = await readJson(req);
       if (!payload || (payload.type !== "transfer" && payload.type !== "raw")) {
         return send(res, 400, { error: 'type must be "transfer" or "raw"' });
       }
+      if (pairing.paused) return send(res, 423, { error: PAUSED_MESSAGE, code: "paused", paused: true });
+      // Who is asking is shown to the user; keep it short. The phone checks it again before showing it.
+      if (typeof payload.agent === "string") payload.agent = payload.agent.slice(0, MAX_AGENT_NAME);
+      else delete payload.agent;
+      if (typeof payload.agentIcon !== "string" || payload.agentIcon.length > MAX_AGENT_ICON) delete payload.agentIcon;
       if (pendingList(pairing).length >= MAX_PENDING || totalPending() >= MAX_PENDING_TOTAL) {
         return send(res, 429, { error: "Too many requests are already waiting" });
       }
@@ -740,7 +768,7 @@ function createRelay({
       }
       pairing.phones.add(ws);
       log(`phone connected to ${pairing.id} (${pairing.phones.size} online)`);
-      ws.send(JSON.stringify({ kind: "pending", requests: pendingList(pairing) }));
+      ws.send(JSON.stringify({ kind: "pending", requests: pendingList(pairing), paused: pairing.paused }));
       ws.on("message", (data) => {
         let message;
         try {

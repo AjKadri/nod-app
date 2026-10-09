@@ -137,14 +137,22 @@ test("risky is true for red warnings only: mismatch, failed preview, unknown pro
 
 test("demo mode sample data covers every state and uses the real presenter", () => {
   const { demoRequests, demoHistory } = require("../shared/demo");
-  const [normal, risky] = demoRequests();
+  const [normal, risky, coder] = demoRequests();
   assert.equal(normal.presented.amount, "0.002005");
   assert.equal(normal.presented.risky, false);
   assert.equal(risky.note, "tiny 0.001 SOL test payment");
   assert.equal(risky.presented.amount, "0.030005");
   assert.equal(risky.presented.risky, true);
   assert.equal(risky.presented.mismatch.message, "The agent said 0.001 SOL. This sends 0.030005 SOL.");
-  assert.deepEqual(demoHistory().map((h) => h.status), ["approved", "rejected", "failed"]);
+  // Three different agents are waiting, each with its own name and icon.
+  assert.deepEqual([normal, risky, coder].map((r) => r.agent), ["Research agent", "Trading agent", "Claude Code"]);
+  assert.equal(new Set([normal, risky, coder].map((r) => r.agentIcon)).size, 3);
+  assert.deepEqual(demoHistory().map((h) => h.status), ["approved", "rejected", "failed", "approved", "rejected"]);
+  // Every icon in the sample data is one the phone will accept.
+  const { cleanAgentIcon } = require("../shared/agent");
+  for (const sample of [...demoRequests(), ...demoHistory()]) assert.ok(cleanAgentIcon(sample.agentIcon), sample.id);
+  // Older history is dated by calendar day, not by seconds, so it falls in Yesterday and Earlier at any hour.
+  assert.deepEqual(demoHistory().filter((h) => h.daysAgo).map((h) => h.daysAgo), [1, 3]);
   assert.ok(demoHistory().find((h) => h.status === "failed").reason);
   const ids = [...demoRequests(), ...demoHistory()].map((x) => x.id);
   assert.equal(new Set(ids).size, ids.length);

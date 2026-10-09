@@ -4,9 +4,10 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import Animated, { SlideInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { DemoPill, DetailRow, Eyebrow, Label, NodButton, useNow, Wordmark } from '@/components/ui'
+import { AgentMark, DemoPill, DetailRow, Eyebrow, Label, NodButton, useNow, Wordmark } from '@/components/ui'
 import { radius, size, space } from '@/constants/theme'
 import { useNetwork } from '@/features/network/use-network'
+import { describeAgent } from './lib/agent'
 import { formatSol } from './lib/approval'
 import type { Presented } from './lib/present'
 import { useApprovals, type Item } from './approvals-provider'
@@ -33,8 +34,8 @@ export function ApprovalCard({
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const { presented, phase } = item
-  const payload = (item.request.payload ?? {}) as { agent?: string }
-  const agent = payload.agent || 'Unnamed agent'
+  const who = describeAgent(item.request.payload)
+  const agent = who.name
   const working = phase === 'working'
   const ready = phase === 'ready'
   const risky = !!presented?.risky
@@ -70,7 +71,7 @@ export function ApprovalCard({
           </View>
 
           <View style={styles.agentRow}>
-            <Ionicons name="laptop-outline" size={24} color={tokens.text} />
+            <AgentMark icon={who.icon} />
             <View style={styles.agentText}>
               <Text style={{ color: tokens.text, fontSize: size.body + 2 }} numberOfLines={1}>
                 {agent}

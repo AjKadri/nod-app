@@ -3,6 +3,7 @@ import React, { PropsWithChildren, useEffect, useState } from 'react'
 import { Pressable, StyleProp, StyleSheet, Text, TextProps, TextStyle, View, ViewStyle } from 'react-native'
 import { useTheme } from '@/components/theme-provider'
 import { radius, size } from '@/constants/theme'
+import type { AgentIcon, IconPreset } from '@/features/approvals/lib/agent'
 
 /** The `nod.` wordmark. The dot uses the accent green. */
 export function Wordmark({ fontSize = 30 }: { fontSize?: number }) {
@@ -212,3 +213,40 @@ const styles = StyleSheet.create({
     width: 96,
   },
 })
+
+const PRESET_GLYPHS: Record<IconPreset, keyof typeof Ionicons.glyphMap> = {
+  code: 'code-slash-outline',
+  terminal: 'terminal-outline',
+  sparkles: 'sparkles-outline',
+  chat: 'chatbubbles-outline',
+  search: 'search-outline',
+  globe: 'globe-outline',
+  flash: 'flash-outline',
+  cube: 'cube-outline',
+}
+
+/**
+ * An agent's icon: one of our own drawings, a single emoji, or a laptop when it gave none.
+ * The agent only ever picks from that list, so it cannot make the phone load anything.
+ * Decorative: the agent's name beside it is what is read aloud.
+ */
+export function AgentMark({ icon, size: box = 28, color }: { icon?: AgentIcon; size?: number; color?: string }) {
+  const { tokens } = useTheme()
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{ alignItems: 'center', height: box, justifyContent: 'center', width: box }}
+    >
+      {icon?.kind === 'emoji' ? (
+        <Text style={{ fontSize: box * 0.8 }}>{icon.value}</Text>
+      ) : (
+        <Ionicons
+          name={icon?.kind === 'preset' ? PRESET_GLYPHS[icon.name] : 'laptop-outline'}
+          size={box}
+          color={color ?? tokens.text}
+        />
+      )}
+    </View>
+  )
+}

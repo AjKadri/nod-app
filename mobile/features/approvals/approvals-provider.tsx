@@ -15,6 +15,7 @@ import { ApprovalsConfig } from '@/constants/approvals-config'
 import { tokenOf } from '@/features/pairing/pairing-store'
 import { usePairings } from '@/features/pairing/pairing-provider'
 import { buildDemo } from './demo-data'
+import { cleanAgentName, describeAgent, type AgentIcon } from './lib/agent'
 import { reviewRequest, type Review, type SignAndSend } from './lib/approval'
 import { rpcChain } from './lib/chain'
 import { submitApproval, submitDenial, submitInvalid, type Outcome } from './lib/flow'
@@ -36,6 +37,8 @@ export type Item = {
 export type HistoryEntry = {
   id: string
   agent: string
+  /** Absent in history saved before icons existed. */
+  agentIcon?: AgentIcon
   note: string | null
   amount: string | null
   unit: string
@@ -49,6 +52,9 @@ export type HistoryEntry = {
   /** Sample data from demo mode: nothing was signed, sent or reported. */
   demo?: boolean
 }
+
+/** Whether new requests are blocked: off, on for every paired laptop, or on for only some of them. */
+export type PauseState = 'off' | 'on' | 'partial'
 
 type ApprovalsValue = {
   address?: string
@@ -67,6 +73,13 @@ type ApprovalsValue = {
   /** Demo mode: sample requests that never touch the wallet or the relay. */
   demo: boolean
   setDemo: (on: boolean) => void
+  /** "Pause everything", as each paired relay last confirmed it. */
+  pauseState: PauseState
+  pauseBusy: boolean
+  /** Set when the last attempt did not reach every laptop; cleared by the next success. `target` is what was asked for. */
+  pauseProblem: { message: string; target: boolean } | null
+  /** Pause or resume every paired laptop. The state shown is only what the relays confirm. */
+  setPaused: (on: boolean) => Promise<void>
 }
 
 const HISTORY_KEY = 'nod.history.v1'
@@ -82,6 +95,10 @@ const ApprovalsContext = createContext<ApprovalsValue>({
   reconnectRelay: () => {},
   demo: false,
   setDemo: () => {},
+  pauseState: 'off',
+  pauseBusy: false,
+  pauseProblem: null,
+  setPaused: async () => {},
 })
 
 function overallStatus(statuses: Record<string, RelayStatus>, ids: string[]): RelayStatus {
@@ -97,18 +114,34 @@ function haptic(run: () => Promise<void>) {
   run().catch(() => {})
 }
 
-function payloadOf(request: RelayRequest): { agent?: string; note?: string } {
-  return request.payload && typeof request.payload === 'object'
-    ? (request.payload as { agent?: string; note?: string })
-    : {}
+function payloadOf(request: RelayRequest): { note?: string } {
+  return request.payload && typeof request.payload === 'object' ? (request.payload as { note?: string }) : {}
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timed out')), ms)
+    work.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
 }
 
 function entryFor(item: Item, outcome: Outcome): HistoryEntry {
   const payload = payloadOf(item.request)
   const presented = item.presented
+  const agent = describeAgent(item.request.payload)
   return {
     id: item.request.id,
-    agent: payload.agent || 'Unnamed agent',
+    agent: agent.name,
+    agentIcon: agent.icon,
     note: presented?.agentClaim ?? (payload.note || null),
     amount: presented?.amount ?? null,
     unit: presented?.unit ?? 'SOL',
@@ -138,6 +171,11 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [reconnectKey, setReconnectKey] = useState(0)
+  // What each relay last said about "Pause everything", by pairing id.
+  const [pausedBy, setPausedBy] = useState<Record<string, boolean>>({})
+  const [pauseBusy, setPauseBusy] = useState(false)
+  const [pauseProblem, setPauseProblem] = useState<{ message: string; target: boolean } | null>(null)
+  const [demoPaused, setDemoPaused] = useState(false)
   // Demo mode keeps its own items and history. Nothing in it reaches the wallet or the relay.
   const [demo, setDemoState] = useState(false)
   const demoRef = useRef(false)
@@ -162,7 +200,10 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       .then((stored) => {
         if (stored) {
           const parsed: unknown = JSON.parse(stored)
-          if (Array.isArray(parsed)) setHistory(parsed as HistoryEntry[])
+          // Names saved by older versions were not cleaned; clean them as they are read back.
+          if (Array.isArray(parsed)) {
+            setHistory((parsed as HistoryEntry[]).map((entry) => ({ ...entry, agent: cleanAgentName(entry.agent) })))
+          }
         }
       })
       .catch(() => {})
@@ -193,6 +234,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
           // The laptop revoked the pairing: forget it here too.
           if (status === 'revoked') forget(pairing.id, `${pairing.label} ended the pairing.`)
         },
+        onPaused: (paused) => setPausedBy((previous) => ({ ...previous, [pairing.id]: paused })),
         onRequest: (request) => {
           setItems((previous) => [
             ...previous,
@@ -236,6 +278,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       relaysRef.current = new Map()
       setItems(() => [])
       setStatuses({})
+      setPausedBy({})
     }
   }, [address, chain, forget, pairings, reconnectKey, remember, setItems])
 
@@ -260,9 +303,54 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
     [setItems],
   )
 
+  const setPaused = useCallback(
+    async (on: boolean) => {
+      if (demoRef.current) {
+        setDemoPaused(on) // pretend: there are no agents in demo mode
+        return
+      }
+      setPauseBusy(true)
+      const failed: string[] = []
+      await Promise.all(
+        pairings.map(async (pairing) => {
+          const client = relaysRef.current.get(pairing.id)
+          try {
+            if (!client) throw new Error('not connected')
+            await withTimeout(client.setPaused(on), 8000)
+          } catch {
+            failed.push(pairing.label)
+          }
+        }),
+      )
+      setPauseBusy(false)
+      setPauseProblem(
+        failed.length === 0
+          ? null
+          : {
+              target: on,
+              message: `Could not reach ${failed.join(', ')}. ${on ? 'It can still send requests' : 'It is still paused'} until this works. Check the connection and try again.`,
+            },
+      )
+      haptic(() =>
+        failed.length === 0
+          ? Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+          : Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+      )
+    },
+    [pairings],
+  )
+
+  const pauseState = useMemo<PauseState>(() => {
+    if (demo) return demoPaused ? 'on' : 'off'
+    const flags = pairings.map((pairing) => pausedBy[pairing.id] === true)
+    if (flags.length === 0 || flags.every((flag) => !flag)) return 'off'
+    return flags.every(Boolean) ? 'on' : 'partial'
+  }, [demo, demoPaused, pairings, pausedBy])
+
   const setDemo = useCallback((on: boolean) => {
     demoRef.current = on
     setDemoState(on)
+    setDemoPaused(false)
     const seed = on ? buildDemo(Date.now()) : { items: [], history: [] }
     setDemoItems(seed.items)
     setDemoHistory(seed.history)
@@ -364,8 +452,28 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       reconnectRelay: () => setReconnectKey((key) => key + 1),
       demo,
       setDemo,
+      pauseState,
+      pauseBusy,
+      pauseProblem,
+      setPaused,
     }),
-    [address, statuses, pairings, items, history, approve, reject, demo, demoItems, demoHistory, setDemo],
+    [
+      address,
+      statuses,
+      pairings,
+      items,
+      history,
+      approve,
+      reject,
+      demo,
+      demoItems,
+      demoHistory,
+      setDemo,
+      pauseState,
+      pauseBusy,
+      pauseProblem,
+      setPaused,
+    ],
   )
 
   return <ApprovalsContext.Provider value={value}>{children}</ApprovalsContext.Provider>

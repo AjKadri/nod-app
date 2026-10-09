@@ -27,6 +27,10 @@ async function readJson(response) {
   } catch (_err) {
     body = { error: text };
   }
+  if (response.status === 423) {
+    // The user pressed "Pause everything" on their phone. Not an error to retry through.
+    throw Object.assign(new Error(body.error || "Approvals are paused on the phone."), { code: "paused", status: 423 });
+  }
   if (!response.ok) {
     const hint = response.status === 401 ? ' Pair this laptop with your phone first: node agent/pair.js' : "";
     throw new Error(`Relay error ${response.status}: ${body.error || text}.${hint}`.replace("..", "."));
@@ -43,7 +47,8 @@ async function getWalletAddress({ relay, token = "" }) {
 /**
  * Send a request to the phone and wait until it is approved, denied, failed or expired.
  * If nobody answers within timeoutMs the request is withdrawn from the phone.
- * @param payload { type: "transfer", to, lamports, note?, agent? } or { type: "raw", transactionBase64, note?, agent? }
+ * @param payload { type: "transfer", to, lamports, note?, agent?, agentIcon? } or { type: "raw", transactionBase64, note?, agent?, agentIcon? }
+ * Throws an error with `code: "paused"` if the user has paused approvals on the phone.
  * @returns {{ id, status, result }} status is approved | denied | failed | expired | timeout
  */
 async function requestApproval({ relay, token = "", payload, timeoutMs = 5 * 60 * 1000, onCreated }) {

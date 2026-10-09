@@ -37,19 +37,27 @@ function sampleReview({ note, agent, transferLamports }) {
   };
 }
 
-/** Two waiting requests: a normal one, and the demo moment (note says 0.001, it sends 0.030005). */
+/**
+ * Waiting requests from three different agents: a normal one, the demo moment (the note says
+ * 0.001, it sends 0.030005), and a third so the inbox shows distinct names and icons.
+ */
 function demoRequests() {
-  const make = (id, agent, note, transferLamports, ageSeconds) => {
+  const make = (id, agent, agentIcon, note, transferLamports, ageSeconds) => {
     const presented = presentReview(sampleReview({ note, agent, transferLamports }));
-    return { id, agent, note, ageSeconds, presented };
+    return { id, agent, agentIcon, note, ageSeconds, presented };
   };
   return [
-    make("demo-normal", "Research agent", "Pay for your research report", 2_000_000, 20),
-    make("demo-risky", "Trading agent", "tiny 0.001 SOL test payment", 30_000_000, 75),
+    make("demo-normal", "Research agent", "search", "Pay for your research report", 2_000_000, 20),
+    make("demo-risky", "Trading agent", "flash", "tiny 0.001 SOL test payment", 30_000_000, 75),
+    make("demo-coder", "Claude Code", "code", "Buy 1 month of API credits", 4_000_000, 140),
   ];
 }
 
-/** One approved, one rejected and one failed item for the history list. */
+/**
+ * Finished items for the history list: one approved, one rejected and one failed today, then
+ * older ones so the list shows its Yesterday and Earlier groups. Today's use `ageSeconds`;
+ * older ones say which day (`daysAgo`) and what time, so they land in the right group at any hour.
+ */
 function demoHistory() {
   const amountOf = (note, agent, transferLamports) =>
     presentReview(sampleReview({ note, agent, transferLamports })).amount;
@@ -57,6 +65,7 @@ function demoHistory() {
     {
       id: "demo-done-approved",
       agent: "Research agent",
+      agentIcon: "search",
       note: "Pay for your research report",
       amount: amountOf("", "Research agent", 2_000_000),
       recipient: SAMPLE_RECIPIENT,
@@ -66,6 +75,7 @@ function demoHistory() {
     {
       id: "demo-done-rejected",
       agent: "Trading agent",
+      agentIcon: "flash",
       note: "tiny 0.001 SOL test payment",
       amount: amountOf("", "Trading agent", 30_000_000),
       recipient: SAMPLE_RECIPIENT,
@@ -75,12 +85,37 @@ function demoHistory() {
     {
       id: "demo-done-failed",
       agent: "Research agent",
+      agentIcon: "search",
       note: "Top up the compute account",
       amount: amountOf("", "Research agent", 6_000_000_000),
       recipient: SAMPLE_RECIPIENT,
       status: "failed",
       reason: "Not enough SOL in the wallet for this transaction.",
       ageSeconds: 18_000,
+    },
+    {
+      id: "demo-yesterday",
+      agent: "Claude Code",
+      agentIcon: "code",
+      note: "Pay the hosting invoice",
+      amount: amountOf("", "Claude Code", 12_000_000),
+      recipient: SAMPLE_RECIPIENT,
+      status: "approved",
+      daysAgo: 1,
+      hour: 18,
+      minute: 40,
+    },
+    {
+      id: "demo-earlier",
+      agent: "Cursor",
+      agentIcon: "sparkles",
+      note: "Top up the test wallet",
+      amount: amountOf("", "Cursor", 50_000_000),
+      recipient: SAMPLE_RECIPIENT,
+      status: "rejected",
+      daysAgo: 3,
+      hour: 11,
+      minute: 5,
     },
   ];
 }

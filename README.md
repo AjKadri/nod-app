@@ -98,6 +98,10 @@ Add this to the agent's MCP config, with the real path:
 }
 ```
 
+`AGENT_NAME` is what the phone shows on each request, so give every agent its own (`claude-code`, `cursor`, `codex`). Optionally add `AGENT_ICON`: one of `code`, `terminal`, `sparkles`, `chat`, `search`, `globe`, `flash`, `cube`, or a single emoji. Anything else (a web address, plain text) is ignored; the agent chooses its own label, so the phone treats it as a claim, not as proof of who is asking. Without them the request shows as "Unnamed agent" with a laptop icon.
+
+**Pause everything.** The switch at the top of the app's inbox makes the relay refuse every new request from your paired laptops with `423`. Each agent is told "paused all approvals … do not retry" instead of hanging or guessing, and `node agent/request.js` exits with code 3. Requests already waiting stay answerable. It lasts until you switch it off, including across a relay restart, and the switch only shows what the relay has confirmed: if a laptop cannot be reached, the app says so and offers to try again.
+
 Then ask it: "send 0.001 SOL to <ADDRESS> on devnet". Tools: `get_wallet_address`, `request_transfer`, `request_transaction`.
 
 ## What the tests found that matters for the real build

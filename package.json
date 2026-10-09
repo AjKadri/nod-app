@@ -13,7 +13,7 @@
     "local-rpc": "node sim/local-rpc.js",
     "demo": "node sim/demo.js",
     "sync": "node scripts/sync-shared.js",
-    "test": "node scripts/sync-shared.js --check && node scripts/vps-bundle.js --check && node --test --test-timeout=30000 test/loop.test.js test/present.test.js test/pairing.test.js test/hosting.test.js",
+    "test": "node scripts/sync-shared.js --check && node scripts/vps-bundle.js --check && node --test --test-timeout=30000 test/loop.test.js test/present.test.js test/pairing.test.js test/hosting.test.js test/agents.test.js",
     "pair": "node agent/pair.js"
   },
   "dependencies": {

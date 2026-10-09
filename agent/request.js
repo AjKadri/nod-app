@@ -12,6 +12,7 @@
  * sending, which makes the blockhash stale on purpose (feasibility Test 4).
  *
  * Options: --relay URL  --rpc URL  --note TEXT  --timeout SECONDS  --hold SECONDS
+ *          --agent NAME  --icon NAME_OR_EMOJI   (how the phone shows this agent; env AGENT_NAME, AGENT_ICON)
  * Env:     RELAY_URL, RELAY_TOKEN, RPC_URL. Without them the pairing saved by agent/pair.js is used.
  */
 const { getWalletAddress, requestApproval, buildRawTransfer } = require("./client");
@@ -53,10 +54,13 @@ async function main() {
   if (!Number.isFinite(sol) || sol <= 0) fail("--sol must be a positive number, e.g. 0.001");
   const lamports = Math.round(sol * 1_000_000_000);
   const note = typeof args.note === "string" ? args.note : `from laptop agent (${mode})`;
+  const agent = String(typeof args.agent === "string" ? args.agent : process.env.AGENT_NAME || "laptop-script").slice(0, 60);
+  const icon = String(typeof args.icon === "string" ? args.icon : process.env.AGENT_ICON || "").trim().slice(0, 32);
+  const identity = { agent, ...(icon ? { agentIcon: icon } : {}) };
 
   let payload;
   if (mode === "transfer") {
-    payload = { type: "transfer", to: args.to, lamports, note, agent: "laptop-script" };
+    payload = { type: "transfer", to: args.to, lamports, note, ...identity };
   } else {
     const from = await getWalletAddress({ relay, token });
     if (!from) fail("No phone wallet is registered with the relay yet. Open the app and connect the wallet first.");
@@ -67,7 +71,7 @@ async function main() {
       console.log(`Holding it for ${hold}s so the blockhash goes stale...`);
       await new Promise((resolve) => setTimeout(resolve, hold * 1000));
     }
-    payload = { type: "raw", transactionBase64: built.transactionBase64, note, agent: "laptop-script" };
+    payload = { type: "raw", transactionBase64: built.transactionBase64, note, ...identity };
   }
 
   const started = Date.now();
@@ -93,6 +97,10 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (err && err.code === "paused") {
+    console.error(`PAUSED: ${err.message}`);
+    process.exit(3);
+  }
   console.error(`Error: ${err.message}`);
   process.exit(1);
 });
