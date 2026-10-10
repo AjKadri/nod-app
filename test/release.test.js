@@ -174,16 +174,22 @@ test("site: assetlinks.json names the app and holds only well-formed SHA-256 fin
   }
 });
 
-test("site: one page with the wordmark, the line, three steps, a download link and a demo video slot", () => {
+test("site: one page with the wordmark, the line, the steps, a download link and a demo video slot", () => {
   const html = read("site", "index.html");
-  assert.match(html, /Your agent asks\. You nod\./);
-  assert.match(html, /class="wordmark"[^>]*>nod<span>\.<\/span>/);
-  assert.equal((html.match(/<li>/g) || []).length, 3);
-  assert.match(html, /href="\/nod\.apk"/, "the APK is served from the VPS, not from the private repo");
+  assert.match(html, /<h1><span>Your agent asks\.<\/span><span>You nod\.<\/span><\/h1>/);
+  assert.match(html, /class="mark"[^>]*>nod<i>\.<\/i>/);
+  assert.match(html, /<ol class="steps">/);
+  assert.match(html, /href="\/nod\.apk"/, "the APK is served from the VPS, not loaded from GitHub");
   assert.doesNotMatch(html, /raw\/build-artifacts/);
-  assert.match(html, /id="demo"/);
-  assert.match(html, /prefers-color-scheme: dark/);
-  assert.doesNotMatch(html, /<script|https?:\/\/[^"' ]*(fonts|cdn)\./i, "nothing is loaded from other sites");
+  assert.match(html, /id="video"/);
+  assert.match(html, /\/demo\.mp4/);
+  // The only script is the inline check for demo.mp4 on the same site. The only other site the page
+  // contacts is Google Fonts (a decision of the redesign: it is the one thing loaded from elsewhere).
+  const scripts = html.match(/<script[^>]*>/g) || [];
+  assert.deepEqual(scripts, ["<script>"], "one inline script, no script files");
+  const hosts = new Set((html.match(/https?:\/\/[^"' <)]+/g) || []).map((url) => new URL(url).hostname));
+  const allowed = new Set(["nod.ajkadri.dev", "relay.ajkadri.dev", "github.com", "fonts.googleapis.com", "fonts.gstatic.com"]);
+  for (const host of hosts) assert.ok(allowed.has(host), `unexpected site: ${host}`);
 });
 
 // ---------------------------------------------------------------- the installer
@@ -212,35 +218,50 @@ test("installer: the site bundle check sees a stale copy", () => {
 
 // ---------------------------------------------------------------- publishing the APK
 
-/** Run publish-apk.sh with stand-ins for gh, scp and ssh that record what they were asked to do. */
-function runPublish({ apkBytes = 2_000_000, tamper = false, extraEnv = {} } = {}) {
+/**
+ * Run publish-apk.sh with stand-ins for ssh and curl. The ssh stand-in runs the command it was given
+ * on this machine (so the script that would run on the server really runs), and the curl stand-in
+ * serves files from a folder instead of GitHub and records the addresses asked for.
+ */
+function runPublish({ apkBytes = 2_000_000, tamper = false, omit = [], extraEnv = {}, args = ["root@example.org"] } = {}) {
   const os = require("node:os");
   const crypto = require("node:crypto");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nod-publish-"));
   const bin = path.join(dir, "bin");
-  fs.mkdirSync(bin);
+  const served = path.join(dir, "served");
+  const site = path.join(dir, "site");
+  for (const d of [bin, served, site]) fs.mkdirSync(d);
   const apk = Buffer.alloc(apkBytes, 7);
   const sum = crypto.createHash("sha256").update(tamper ? Buffer.from("other") : apk).digest("hex");
-  fs.writeFileSync(path.join(dir, "nod.apk"), apk);
-  fs.writeFileSync(path.join(dir, "SHA256SUMS"), `${sum}  nod.apk\n${"0".repeat(64)}  mock-wallet.apk\n`);
-  fs.writeFileSync(path.join(dir, "BUILD.txt"), "Built from abc123 by run 9\n");
+  const files = {
+    "nod.apk": apk,
+    SHA256SUMS: `${sum}  nod.apk\n${"0".repeat(64)}  mock-wallet.apk\n`,
+    "BUILD.txt": "Built from abc123 by run 9\n",
+  };
+  for (const [name, body] of Object.entries(files)) if (!omit.includes(name)) fs.writeFileSync(path.join(served, name), body);
   const log = path.join(dir, "calls.log");
   const stub = (name, body) => {
     fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
   };
-  stub("gh", `echo "gh $*" >> "${log}"
-case "$1" in
-  auth) exit 0 ;;
-  repo) echo "me/private-repo" ;;
-  api) f="\${@: -1}"; f="\${f#*contents/}"; f="\${f%%\\?*}"; cat "${dir}/$f" ;;
-esac`);
-  stub("scp", `echo "scp $*" >> "${log}"; for last; do :; done; cp "\${@: -2:1}" "${dir}/uploaded-$(basename "\${@: -1}")"`);
-  stub("ssh", `echo "ssh $*" >> "${log}"`);
+  // ssh HOST COMMAND...: log it, then run COMMAND here with the same standard input.
+  stub("ssh", `echo "ssh $*" >> "${log}"; shift; "$@"`);
+  // curl ... -o FILE URL: log the address, copy the named file from the folder, or fail like curl -f does.
+  stub(
+    "curl",
+    `echo "curl $*" >> "${log}"
+out=""; url=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done
+f="${served}/$(basename "$url")"
+[ -f "$f" ] || exit 22
+cp "$f" "$out"`,
+  );
+  stub("gh", `echo "gh $*" >> "${log}"; exit 1`);
+  stub("scp", `echo "scp $*" >> "${log}"; exit 1`);
   let status = 0;
   let output = "";
   try {
-    output = execFileSync("bash", [path.join(ROOT, "scripts", "publish-apk.sh"), "root@example.org"], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extraEnv },
+    output = execFileSync("bash", [path.join(ROOT, "scripts", "publish-apk.sh"), ...args], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, NOD_SITE_DIR: site, ...extraEnv },
       encoding: "utf8",
       stdio: "pipe",
     });
@@ -249,29 +270,65 @@ esac`);
     output = `${error.stdout}${error.stderr}`;
   }
   const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "";
-  return { status, output, calls, dir, sum };
+  return { status, output, calls, dir, site, sum, apk };
 }
 
-test("publish-apk: downloads from the private repo's build-artifacts branch and puts it on the server in one swap", () => {
-  const { status, calls, dir, sum } = runPublish();
-  assert.equal(status, 0);
-  assert.match(calls, /gh api .*repos\/me\/private-repo\/contents\/nod\.apk\?ref=build-artifacts/);
-  assert.match(calls, /scp .*\/nod\.apk root@example\.org:\/var\/www\/nod\/\.nod\.apk\.new/);
-  assert.match(calls, /ssh root@example\.org .*mv -f \.nod\.apk\.new nod\.apk/);
-  // The site lists only the file it serves.
-  assert.equal(fs.readFileSync(path.join(dir, "uploaded-.SHA256SUMS.new"), "utf8"), `${sum}  nod.apk\n`);
+test("publish-apk: the server downloads the build from the public repo's build-artifacts branch and swaps it in", () => {
+  const { status, calls, site, sum, apk, output } = runPublish();
+  assert.equal(status, 0, output);
+  for (const file of ["nod.apk", "SHA256SUMS", "BUILD.txt"]) {
+    assert.match(calls, new RegExp(`curl .*https://github\\.com/AjKadri/nod-app/raw/build-artifacts/${file.replace(".", "\\.")}`));
+  }
+  // Nothing is uploaded from the laptop, and the GitHub CLI is not needed.
+  assert.doesNotMatch(calls, /^(scp|gh) /m);
+  assert.ok(fs.readFileSync(path.join(site, "nod.apk")).equals(apk));
+  // The site lists only the file it serves, and no temporary files are left.
+  assert.equal(fs.readFileSync(path.join(site, "SHA256SUMS"), "utf8"), `${sum}  nod.apk\n`);
+  assert.deepEqual(fs.readdirSync(site).sort(), ["SHA256SUMS", "nod.apk"]);
+  assert.match(output, /Built from abc123 by run 9/);
 });
 
-test("publish-apk: a download that does not match its checksum is never uploaded", () => {
-  const { status, output, calls } = runPublish({ tamper: true });
+test("publish-apk: NOD_REPO changes where the server downloads from", () => {
+  const { status, calls } = runPublish({ extraEnv: { NOD_REPO: "someone/fork" } });
+  assert.equal(status, 0);
+  assert.match(calls, /github\.com\/someone\/fork\/raw\/build-artifacts\/nod\.apk/);
+});
+
+test("publish-apk: a download that does not match its checksum is never published", () => {
+  const { status, output, site } = runPublish({ tamper: true });
   assert.notEqual(status, 0);
   assert.match(output, /does not match SHA256SUMS/);
-  assert.doesNotMatch(calls, /scp|ssh/);
+  assert.deepEqual(fs.readdirSync(site), []);
 });
 
-test("publish-apk: a tiny file is never uploaded, and the server can be named by environment", () => {
+test("publish-apk: a tiny file, or a build that is not there yet, is never published", () => {
   const tiny = runPublish({ apkBytes: 100 });
   assert.notEqual(tiny.status, 0);
-  assert.doesNotMatch(tiny.calls, /scp/);
-  assert.throws(() => execFileSync("bash", [path.join(ROOT, "scripts", "publish-apk.sh")], { env: { ...process.env, NOD_SERVER: "" }, stdio: "pipe" }));
+  assert.match(tiny.output, /suspiciously small/);
+  assert.deepEqual(fs.readdirSync(tiny.site), []);
+  const missing = runPublish({ omit: ["SHA256SUMS"] });
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.output, /Could not download .*SHA256SUMS.*CI build/);
+  assert.deepEqual(fs.readdirSync(missing.site), []);
+});
+
+test("publish-apk: an existing nod.apk stays in place when the new download fails", () => {
+  const site = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "nod-site-"));
+  fs.writeFileSync(path.join(site, "nod.apk"), "old build");
+  const result = runPublish({ tamper: true, extraEnv: { NOD_SITE_DIR: site } });
+  assert.notEqual(result.status, 0);
+  assert.equal(fs.readFileSync(path.join(site, "nod.apk"), "utf8"), "old build");
+});
+
+test("publish-apk: needs a server, and refuses odd repo or folder names before connecting", () => {
+  const none = runPublish({ args: [], extraEnv: { NOD_SERVER: "" } });
+  assert.notEqual(none.status, 0);
+  assert.equal(none.calls, "");
+  const bad = runPublish({ extraEnv: { NOD_REPO: "a/b; rm -rf /" } });
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.output, /owner\/name/);
+  assert.equal(bad.calls, "");
+  const odd = runPublish({ extraEnv: { NOD_SITE_DIR: "/var/www/my site" } });
+  assert.notEqual(odd.status, 0);
+  assert.equal(odd.calls, "");
 });

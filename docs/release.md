@@ -42,13 +42,13 @@ ssh root@<server> 'bash setup.sh relay.ajkadri.dev nod.ajkadri.dev'
 
 Run it again after any change to `relay/` or `site/`: it updates both, keeps the registration key and the relay's state, and remembers the site domain. `npm test` and CI fail if the copies inside `setup.sh` are out of date; the fix is `node scripts/vps-bundle.js`, then commit.
 
-**Publishing the APK.** The repo is private, so the page's download button points at `/nod.apk` on the server itself. After a CI build finishes (and `gh auth login` once on your Mac):
+**Publishing the APK.** The repo is public, and the page's download button points at `/nod.apk` on the server itself, so the server fetches the build. After a CI build finishes, from your Mac (only ssh access is needed):
 
 ```sh
 bash scripts/publish-apk.sh root@relay.ajkadri.dev
 ```
 
-It downloads the latest `nod.apk` from the `build-artifacts` branch with `gh`, checks it against `SHA256SUMS`, copies it to `/var/www/nod` with `scp`, and swaps it in place in one step. Running `setup.sh` again keeps the APK.
+The server downloads `nod.apk`, `SHA256SUMS` and `BUILD.txt` from `https://github.com/AjKadri/nod-app/raw/build-artifacts/`, checks `nod.apk` against `SHA256SUMS`, and swaps it into `/var/www/nod` in one step. Nothing is uploaded from your Mac, and a failed or mismatching download leaves the APK that is already there. `NOD_REPO=owner/name` points it at a fork. Running `setup.sh` again keeps the APK.
 
 The page is `site/index.html` (a demo video goes in the marked slot; a `demo.mp4` you put in `/var/www/nod/` on the server survives re-runs). Check the app link file with `curl https://nod.ajkadri.dev/.well-known/assetlinks.json`: it must list your fingerprint.
 
