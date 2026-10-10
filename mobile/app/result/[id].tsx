@@ -5,7 +5,6 @@ import React, { useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
 import { useTheme } from '@/components/theme-provider'
-import { TokenLogo } from '@/components/token-logo'
 import { DemoPill, DetailRow, IconCircle, Label, NodButton, Screen } from '@/components/ui'
 import { radius, space } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
@@ -86,12 +85,9 @@ export default function ResultScreen() {
           {meta.title}
         </Text>
         {entry.amount && entry.status !== 'rejected' ? (
-          <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
-            <Text style={{ color: tokens.text, fontSize: 24 }}>
-              {entry.amount} <Text style={{ color: tokens.muted }}>{entry.unit}</Text>
-            </Text>
-            <TokenLogo logo={entry.logo} size={22} />
-          </View>
+          <Text style={{ color: tokens.text, fontSize: 24 }}>
+            {entry.amount} <Text style={{ color: tokens.muted }}>{entry.unit}</Text>
+          </Text>
         ) : null}
         <Label style={styles.note}>{note}</Label>
       </Animated.View>

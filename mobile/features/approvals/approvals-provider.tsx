@@ -21,18 +21,7 @@ import { buildDemo } from './demo-data'
 import { cleanAgentName, describeAgent, type AgentIcon } from './lib/agent'
 import { reviewRequest, type Review, type SignAndSend } from './lib/approval'
 import type { NetworkId } from './lib/network'
-import {
-  addressToLearn,
-  decideAutoApprove,
-  isEnabled,
-  isPausedForAuto,
-  ledgerEntryFor,
-  normalizeTokenLimit,
-  outflowLamports,
-  tokenLimitRaw,
-  tokenOutflows,
-} from './lib/autoapprove'
-import * as tokenLib from './lib/tokens'
+import { addressToLearn, decideAutoApprove, isPausedForAuto, ledgerEntryFor, outflowLamports } from './lib/autoapprove'
 import { rpcChain } from './lib/chain'
 import {
   explainError,
@@ -70,8 +59,6 @@ export type HistoryEntry = {
   note: string | null
   amount: string | null
   unit: string
-  /** The logo of a token Nod recognises by its mint. */
-  logo?: string
   recipient: string | null
   status: 'approved' | 'rejected' | 'failed'
   signature?: string
@@ -90,21 +77,7 @@ export type HistoryEntry = {
 /** Whether new requests are blocked: off, on for every paired laptop, or on for only some of them. */
 export type PauseState = 'off' | 'on' | 'partial'
 
-/** The daily limit of one token. Amounts are text in whole tokens, e.g. "100". */
-export type AutoTokenView = {
-  mint: string
-  /** "SKR", or "SKR (test)" on Devnet. */
-  label: string
-  logo: string | null
-  /** The limit, or null when none is set. */
-  limit: string | null
-  spent: string
-  remaining: string | null
-  /** Set the limit ("" clears it). Returns false when the text is not an amount. */
-  setLimit: (text: string) => boolean
-}
-
-/** Auto-approve as the screens see it. SOL amounts are lamports. */
+/** Auto-approve as the screens see it. Amounts are lamports. */
 export type AutoView = {
   loaded: boolean
   enabled: boolean
@@ -113,8 +86,6 @@ export type AutoView = {
   remainingLamports: number
   /** Addresses approved by hand before, newest first. */
   knownAddresses: string[]
-  /** SKR on this network (the official mint, or the test mint on Devnet), or null when there is none. */
-  skr: AutoTokenView | null
   setEnabled: (on: boolean) => void
   setLimit: (lamports: number) => void
   forgetAddress: (address: string) => void
@@ -171,7 +142,6 @@ const ApprovalsContext = createContext<ApprovalsValue>({
     spentLamports: 0,
     remainingLamports: 0,
     knownAddresses: [],
-    skr: null,
     setEnabled: () => {},
     setLimit: () => {},
     forgetAddress: () => {},
@@ -222,7 +192,6 @@ function entryFor(item: Item, outcome: Outcome): HistoryEntry {
     note: presented?.agentClaim ?? (payload.note || null),
     amount: presented?.amount ?? null,
     unit: presented?.unit ?? 'SOL',
-    ...(presented?.token?.known && presented.token.logo ? { logo: presented.token.logo } : {}),
     recipient: presented?.recipient.kind === 'address' ? presented.recipient.value : null,
     status: outcome.status === 'approved' ? 'approved' : outcome.status === 'denied' ? 'rejected' : 'failed',
     signature: outcome.signature,
@@ -244,10 +213,6 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const address = account?.address.toString()
   const { network } = useNetwork()
   const chain = useMemo(() => rpcChain(connection, network), [connection, network])
-  const registry = useMemo(
-    () => tokenLib.tokenRegistry(network, { testSkrMint: ApprovalsConfig.testSkrMint }),
-    [network],
-  )
   const { pairings, forget } = usePairings()
   const relaysRef = useRef<Map<string, RelayClient>>(new Map())
   const itemsRef = useRef<Item[]>([])
@@ -345,7 +310,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
             { request, phase: 'reviewing', pairingId: pairing.id, pairingLabel: pairing.label },
           ])
           haptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light))
-          reviewRequest({ payload: request.payload, walletAddress: address, chain, registry })
+          reviewRequest({ payload: request.payload, walletAddress: address, chain })
             .then((review) => {
               // Shows the card, or approves without it when every auto-approve rule holds.
               onReviewedRef.current(request, pairing.id, review, presentReview(review))
@@ -383,7 +348,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       setPausedBy({})
       pausedByRef.current = {}
     }
-  }, [address, chain, forget, pairings, reconnectKey, registry, remember, setItems])
+  }, [address, chain, forget, pairings, reconnectKey, remember, setItems])
 
   const finish = useCallback(
     (item: Item, outcome: Outcome) => {
@@ -511,7 +476,6 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
         knownAddresses: snapshot.known,
         ledger: snapshot.ledger,
         reservedLamports: snapshot.reservedLamports,
-        reservedTokens: snapshot.reservedTokens,
         now: Date.now(),
         paused,
         appActive: AppState.currentState === 'active',
@@ -523,7 +487,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
         return
       }
       autoClaimedRef.current.add(request.id)
-      autoApi.reserve(request.id, decision.outflowLamports, decision.token ? [decision.token] : [])
+      autoApi.reserve(request.id, decision.outflowLamports)
       const pairing = pairings.find((other) => other.id === pairingId)
       const item: Item = {
         request,
@@ -645,11 +609,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
       if (!relay || !address || !item || item.phase !== 'ready') return
       markWorking(id)
       // Hold this payment's money back from auto-approve until it is done.
-      autoApi.reserve(
-        id,
-        item.review ? outflowLamports(item.review) : 0,
-        item.review ? tokenOutflows(item.review).map(({ mint, raw }) => ({ mint, raw })) : [],
-      )
+      autoApi.reserve(id, item.review ? outflowLamports(item.review) : 0)
       let maybeSent = false
 
       // Nod broadcasts by default (the wallet only signs): some wallets fail to send on devnet.
@@ -716,62 +676,23 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   )
 
   const autoView = autoStore.view
-  const skrView = useMemo<AutoTokenView | null>(() => {
-    const mint = tokenLib.officialMintFor(registry, 'SKR')
-    if (!mint) return null
-    const limit = autoView.settings.tokenLimits[mint] ?? null
-    const usage = autoView.tokenUsage(mint)
-    const spent = usage.decimals === null ? '0' : tokenLib.formatTokenAmount(usage.spentRaw, usage.decimals)
-    let remaining: string | null = null
-    if (limit !== null) {
-      if (usage.decimals === null) remaining = limit
-      else {
-        const raw = tokenLimitRaw(autoView.settings, mint, usage.decimals)
-        const left = raw === null ? 0n : raw > usage.spentRaw ? raw - usage.spentRaw : 0n
-        remaining = tokenLib.formatTokenAmount(left, usage.decimals)
-      }
-    }
-    return {
-      mint,
-      label: tokenLib.tokenLabel(registry, mint),
-      logo: registry.tokens[mint]?.logo ?? null,
-      limit,
-      spent,
-      remaining,
-      setLimit: (text) => {
-        const current = autoApi.snapshot().settings
-        const tokenLimits = { ...current.tokenLimits }
-        if (text.trim() === '') delete tokenLimits[mint]
-        else {
-          const normal = normalizeTokenLimit(text)
-          if (!normal) return false
-          tokenLimits[mint] = normal
-        }
-        const next = { ...current, tokenLimits }
-        // The switch cannot stay on with no limit left to apply it to.
-        autoApi.setSettings(isEnabled({ ...next, enabled: true }) ? next : { ...next, enabled: false })
-        return true
-      },
-    }
-  }, [autoApi, autoView, registry])
   const auto = useMemo<AutoView>(
     () => ({
       loaded: autoView.loaded,
-      enabled: isEnabled(autoView.settings),
+      enabled: autoView.settings.enabled && autoView.settings.limitLamports > 0,
       limitLamports: autoView.settings.limitLamports,
       spentLamports: autoView.spentLamports,
       remainingLamports: autoView.remainingLamports,
       knownAddresses: autoView.known,
-      skr: skrView,
       setEnabled: (on) => {
         const current = autoApi.snapshot().settings
-        if (on && !isEnabled({ ...current, enabled: true })) return
+        if (on && current.limitLamports <= 0) return
         autoApi.setSettings({ ...current, enabled: on })
       },
       setLimit: (lamports) => autoApi.setSettings({ ...autoApi.snapshot().settings, limitLamports: lamports }),
       forgetAddress: (address) => autoApi.forget(address),
     }),
-    [autoApi, autoView, skrView],
+    [autoApi, autoView],
   )
 
   const value = useMemo<ApprovalsValue>(

@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import Animated, { SlideInDown } from 'react-native-reanimated'
 import { useTheme } from '@/components/theme-provider'
-import { TokenLogo } from '@/components/token-logo'
 import {
   AgentMark,
   DemoPill,
@@ -171,15 +170,10 @@ function Reviewed({ presented, open, onToggle }: { presented: Presented; open: b
 
       <View>
         {presented.direction === 'receive' ? <Label>You receive</Label> : null}
-        {presented.direction === 'send' && presented.token ? <Label>You send</Label> : null}
         {presented.direction === 'none' ? <Label>No change to your SOL balance</Label> : null}
         <View style={styles.amountRow}>
           <Text
-            accessibilityLabel={
-              presented.amount
-                ? `${presented.direction === 'send' && presented.token ? 'You send ' : ''}${presented.amount} ${presented.unit}`
-                : 'Amount unknown'
-            }
+            accessibilityLabel={presented.amount ? `${presented.amount} ${presented.unit}` : 'Amount unknown'}
             style={[styles.amount, { color: tokens.text }]}
             numberOfLines={1}
             adjustsFontSizeToFit
@@ -187,24 +181,7 @@ function Reviewed({ presented, open, onToggle }: { presented: Presented; open: b
             {presented.amount ?? '—'}
           </Text>
           <Text style={{ color: tokens.muted, fontSize: 24 }}>{presented.unit}</Text>
-          {presented.token && presented.token.known ? <TokenLogo logo={presented.token.logo} /> : null}
         </View>
-        {presented.notes.map((note) => (
-          <Label key={note} style={styles.note}>
-            {note}
-          </Label>
-        ))}
-        {presented.also.map((line) => (
-          <Label key={line} style={styles.note}>
-            {line}
-          </Label>
-        ))}
-        {presented.tokenAlerts.map((alert) => (
-          <View key={alert} accessibilityRole="alert" style={[styles.mismatch, { borderColor: tokens.danger }]}>
-            <Ionicons name="warning-outline" size={20} color={tokens.danger} />
-            <Text style={{ color: tokens.danger, flex: 1, fontSize: size.body, fontWeight: '600' }}>{alert}</Text>
-          </View>
-        ))}
         {presented.mismatch ? (
           <View accessibilityRole="alert" style={[styles.mismatch, { borderColor: tokens.danger }]}>
             <Ionicons name="warning-outline" size={20} color={tokens.danger} />
@@ -218,12 +195,6 @@ function Reviewed({ presented, open, onToggle }: { presented: Presented; open: b
       <View style={[styles.panel, { backgroundColor: tokens.raised }]}>
         <DetailRow label="Recipient" value={recipient} monospace={presented.recipient.kind === 'address'} />
         <DetailRow label="Action" value={presented.action} />
-        {presented.token ? (
-          <DetailRow
-            label="Token"
-            value={presented.token.known ? presented.token.label : shorten(presented.token.mint, 6)}
-          />
-        ) : null}
         <DetailRow label="Network fee" value={presented.fee} />
         <DetailRow
           label="Preview"
@@ -268,21 +239,6 @@ function Details({ presented }: { presented: Presented }) {
           </Text>
         ))}
       </Section>
-
-      {presented.token || presented.tokenLines.length > 0 ? (
-        <Section title="Token balances">
-          {presented.token ? (
-            <Text selectable style={{ color: tokens.muted, fontFamily: 'monospace', fontSize: 12 }}>
-              Mint {presented.token.mint}
-            </Text>
-          ) : null}
-          {presented.tokenLines.map((line) => (
-            <Text key={line} style={{ color: tokens.text, fontSize: size.label }}>
-              {line}
-            </Text>
-          ))}
-        </Section>
-      ) : null}
 
       {presented.transfers.length > 0 ? (
         <Section title="Accounts">
@@ -352,7 +308,6 @@ const styles = StyleSheet.create({
   headline: { fontSize: size.headline, fontWeight: '500', letterSpacing: -0.5, lineHeight: size.headline + 6 },
   amountRow: { alignItems: 'baseline', flexDirection: 'row', gap: 10 },
   amount: { flexShrink: 1, fontSize: size.amount, fontWeight: '400', letterSpacing: -2 },
-  note: { marginTop: 6 },
   mismatch: {
     alignItems: 'center',
     borderRadius: radius.panel,
