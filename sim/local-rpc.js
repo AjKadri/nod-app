@@ -95,6 +95,8 @@ function createLocalRpc({ port = 8899, host = "127.0.0.1", genesisHash = DEVNET_
       value: addresses.map((address) => accountJson(svm.getAccount(new PublicKey(address)))),
     }),
 
+    getMinimumBalanceForRentExemption: ([size]) => Number(svm.minimumBalanceForRentExemption(BigInt(size))),
+
     getBalance: ([address]) => ({
       context: context(),
       value: Number(svm.getBalance(new PublicKey(address)) || 0n),
