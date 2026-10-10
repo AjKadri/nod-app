@@ -67,11 +67,11 @@ The request shows up on the phone, you approve, the wallet signs, and the signat
 
 ### Connect a real agent
 
-Nod ships an MCP server (`agent/mcp-server.js`) with four tools: `get_wallet_address`, `request_transfer`, `request_token_transfer` and `request_transaction`. Short guides with the exact commands:
+Nod ships an MCP server (`agent/mcp-server.js`) with three tools: `get_wallet_address`, `request_transfer` and `request_transaction`. Short guides with the exact commands:
 
 [Claude Code](docs/agents/claude-code.md) · [Cursor](docs/agents/cursor.md) · [Codex](docs/agents/codex.md) · [OpenClaw](docs/agents/openclaw.md)
 
-Then ask the agent: "send 0.001 SOL to `<ADDRESS>` on devnet", or "send 250 SKR to `<ADDRESS>`" (see [Mainnet and tokens](#mainnet-and-tokens-skr)). `AGENT_NAME` (and optionally `AGENT_ICON`) set how the phone labels each agent.
+Then ask the agent: "send 0.001 SOL to `<ADDRESS>` on devnet". `AGENT_NAME` (and optionally `AGENT_ICON`) set how the phone labels each agent.
 
 ### Replay the demo video
 
@@ -83,24 +83,6 @@ NOD_DEMO_RECIPIENT=<DEVNET_ADDRESS> npm run demo:video
 
 It waits for you to press Enter before each of three requests: a normal 0.002 SOL one from "Research agent"; a "Trading agent" that says *tiny 0.001 SOL test payment* but sends 0.03 SOL; and a repeat 0.001 SOL payment that auto-approves. Before you start, switch on auto-approve in the app's Settings with a daily limit of about 0.01 SOL. Use `--only a,c` to run only some steps.
 
-## Mainnet and tokens (SKR)
-
-**Network.** Settings → Network switches between Devnet (default) and Mainnet. Turning Mainnet on shows “Real money. Transactions here are final.” and asks you to confirm; the card's network pill then shows “Mainnet” in the warning colour. Each network keeps its own wallet login, daily limits and trusted addresses. The RPC servers are the public ones; replace them in Settings if they are slow. For the agent side, `node agent/request.js ... --network mainnet` or `NETWORK=mainnet` for the MCP server.
-
-**Tokens.** `request_token_transfer` takes a mint, a recipient and an amount in whole tokens. SPL Token and Token-2022 both work, and so does creating the recipient's token account (the card says “Creates the recipient’s token account: +0.00204 SOL rent”). From the CLI: `node agent/request.js token --mint <MINT> --to <ADDRESS> --amount 250`.
-
-**SKR.** Nod recognises exactly one mint as SKR, `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` (the address on [solanamobile.com/skr](https://solanamobile.com/skr)), and shows its logo slot. Any other token that calls itself SKR gets a red warning. The daily limit can be set for SOL and SKR separately.
-
-**Trying it without real SKR.** Devnet has no SKR, so:
-
-```bash
-npm run devnet:skr-test -- --to <YOUR_PHONE_WALLET>   # makes a test token and sends you 1000
-# put the printed EXPO_PUBLIC_TEST_SKR_MINT=... line in mobile/.env and rebuild the app
-npm run check:skr                                      # reads the real SKR mint on Mainnet, sends nothing
-```
-
-The test token shows as “SKR (test)”. Demo mode also has an official-SKR card and a fake-SKR card.
-
 ## How it fits together
 
 ```
@@ -109,7 +91,7 @@ The test token shows as “SKR (test)”. Demo mode also has an official-SKR car
   Cursor, Codex…)                                                            │ shows the simulated result,
                                                                              │ you nod
                                                                              ▼
-                                              Solana (devnet or mainnet) ◀── signs ── mobile wallet (Mobile Wallet Adapter)
+                                              Solana (devnet) ◀── signs ── mobile wallet (Mobile Wallet Adapter)
 ```
 
 1. The agent asks (by MCP tool, or `agent/request.js`) for a transfer or a finished transaction. It can only ask.
@@ -126,21 +108,19 @@ The approval logic lives once, in `shared/`, and is mirrored into the app.
 - **One phone per pairing.** A pairing is made with a one-time code, and a second phone cannot join it. One pairing cannot see another's requests.
 - **Keys are stored hashed.** The relay keeps only SHA-256 hashes of the agent's and phone's keys. A hosted relay refuses to start without a registration key and accepts only HTTPS.
 - **Pause everything.** One switch in the app makes the relay refuse every new request, and agents are told so rather than left hanging.
-- **Daily limits, per token.** You set a limit in SOL and one in SKR. Each counts every payment of that asset through Nod, and the SOL network fees count against the SOL limit. Both reset at local midnight.
-- **The right network, always.** Every request names its network and the phone refuses one for the other network, before showing anything. It also checks that the RPC server really is that network (by its genesis hash), so a wrong RPC address cannot make it sign for the wrong chain.
-- **Token amounts come from the simulation.** The card shows what the simulated transaction does to your token accounts, with decimals read from the mint on-chain. It never reads an amount from the agent's note or from instruction data. A token that merely calls itself SKR gets a red warning; only the official mint is SKR.
-- **Auto-approve is narrow.** A request skips Nod's card only if it is a plain SOL or SKR transfer (nothing else in the transaction, no new token account to pay for) to an address you approved by hand before, its simulation is clean, it fits in what is left of today's limit for that asset, nothing is paused, and Nod is open on screen. Anything else asks as usual. The limit, trusted addresses and spending record never leave the phone.
+- **Daily limit.** You set a limit in SOL. It counts every payment through Nod, with network fees, and resets at local midnight.
+- **Auto-approve is narrow.** A request skips Nod's card only if it is a plain SOL transfer to an address you approved by hand before, its simulation is clean, it fits in what is left of today's limit, nothing is paused, and Nod is open on screen. Anything else asks as usual. The limit, trusted addresses and spending record never leave the phone.
 - **Stale transactions are refreshed.** If you are slow to approve, the blockhash is refreshed when the wallet is the only signer. Otherwise the transaction is passed through unchanged.
 - **Withdraw on timeout.** If the agent stops waiting, its request is cancelled so it cannot be approved later with nobody listening.
 
 ## Honest limits
 
-- **Mainnet moves real money.** Devnet is the default; Mainnet is a switch in Settings → Network. The app and relay are not audited, so start with amounts you can lose. Transactions are final.
+- **Devnet only.** Do not use real funds. The app and relay are not audited.
 - **The wallet still asks for its own signature.** Auto-approve skips Nod's card, not the wallet's prompt, and Nod cannot know in advance whether your wallet will show one. If the wallet cannot sign without you, nothing is sent and the normal card appears.
 - **Push notifications need Firebase set up.** The relay can push, but you must supply your own Firebase and Expo credentials. Without them requests still arrive over the app's WebSocket while Nod is open, but the phone is not woken for new ones.
 - **Release builds need an HTTPS relay**, so running the APK against your own laptop needs a tunnel or a hosted relay.
 - **Android only.** There is no iOS app. The APK is signed with the author's release key; a debug-signed build from this repo will not match the key published on the site.
-- **Mainnet and real SKR not tested end to end.** The Mainnet path and SKR display were tested with the Solana runtime in-process and a Devnet test token (“SKR (test)”). Real SKR is checked by reading its mint (`npm run check:skr`), not by sending. Blockhash refresh only works when the wallet is the sole signer. The template's `react-native-quick-crypto` 0.7.17 has an open npm advisory and should be upgraded before real use.
+- **Preview checked against devnet only.** Blockhash refresh only works when the wallet is the sole signer. The template's `react-native-quick-crypto` 0.7.17 has an open npm advisory and should be upgraded before real use.
 - **Not tried on every phone and wallet.** The loop has been run end to end on a real phone with Solflare. Other wallets and Android versions are untested.
 
 ## Repo layout

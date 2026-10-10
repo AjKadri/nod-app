@@ -33,7 +33,7 @@ env = { AGENT_NAME = "codex", AGENT_ICON = "terminal" }
 
 Restart Codex. `codex mcp list` shows it.
 
-`AGENT_NAME` is what the phone shows on each request; `AGENT_ICON` is optional (`code`, `terminal`, `sparkles`, `chat`, `search`, `globe`, `flash`, `cube`, or one emoji). Tools: `get_wallet_address`, `request_transfer`, `request_token_transfer` (SPL and Token-2022 tokens such as SKR) and `request_transaction`. Add `NETWORK=mainnet` to the server's environment to ask for Mainnet (real money); the default is Devnet, and a phone on the other network refuses the request.
+`AGENT_NAME` is what the phone shows on each request; `AGENT_ICON` is optional (`code`, `terminal`, `sparkles`, `chat`, `search`, `globe`, `flash`, `cube`, or one emoji). Tools: `get_wallet_address`, `request_transfer`, `request_transaction`.
 
 ## 3. Try it
 
