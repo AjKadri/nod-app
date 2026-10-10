@@ -1,10 +1,14 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "com.ajkadri.nod",
-      "sha256_cert_fingerprints": []
+      "sha256_cert_fingerprints": [
+        "72:79:20:D9:93:E3:9F:D8:07:87:7C:FD:1A:58:12:66:73:94:CC:39:D9:BD:30:0C:26:94:14:38:6E:D1:01:4C"
+      ]
     }
   }
 ]
