@@ -185,10 +185,11 @@ test("site: one page with the wordmark, the line, the steps, a download link and
   assert.match(html, /\/demo\.mp4/);
   // The only script is the inline check for demo.mp4 on the same site. The only other site the page
   // contacts is Google Fonts (a decision of the redesign: it is the one thing loaded from elsewhere).
+  // github.com and x.com are links the visitor can follow, not things the page loads.
   const scripts = html.match(/<script[^>]*>/g) || [];
   assert.deepEqual(scripts, ["<script>"], "one inline script, no script files");
   const hosts = new Set((html.match(/https?:\/\/[^"' <)]+/g) || []).map((url) => new URL(url).hostname));
-  const allowed = new Set(["nod.ajkadri.dev", "relay.ajkadri.dev", "github.com", "fonts.googleapis.com", "fonts.gstatic.com"]);
+  const allowed = new Set(["nod.ajkadri.dev", "relay.ajkadri.dev", "github.com", "x.com", "fonts.googleapis.com", "fonts.gstatic.com"]);
   for (const host of hosts) assert.ok(allowed.has(host), `unexpected site: ${host}`);
 });
 

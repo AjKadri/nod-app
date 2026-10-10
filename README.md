@@ -5,6 +5,7 @@
 - Demo video: *link coming soon*
 - Deck: *link coming soon*
 - Site and APK: https://nod.ajkadri.dev
+- X: https://x.com/nod_app
 
 Built for the Solana Mobile CLOCK IN hackathon. Android, Solana devnet, MIT licensed.
 
