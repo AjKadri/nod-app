@@ -24,6 +24,7 @@ import { parseSolToLamports } from '@/features/approvals/lib/autoapprove'
 import { usePairings } from '@/features/pairing/pairing-provider'
 import { usePush } from '@/features/push/push-provider'
 import { useNetwork } from '@/features/network/use-network'
+import { NETWORKS, type NetworkId } from '@/features/approvals/lib/network'
 import { shorten } from '@/utils/format'
 
 const THEMES: { value: ThemePreference; label: string }[] = [
@@ -52,7 +53,6 @@ export default function SettingsScreen() {
   const { tokens, preference, setPreference } = useTheme()
   const router = useRouter()
   const { account, disconnect } = useMobileWallet()
-  const { networks, selectedNetwork, setSelectedNetwork } = useNetwork()
   const { pairingStatuses, demo, setDemo } = useApprovals()
   const { pairings, revoke } = usePairings()
   const { status: pushStatus, enable: enablePush } = usePush()
@@ -182,18 +182,115 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title="Network">
-          <Segmented
-            options={networks.map((network) => ({ value: network.id, label: network.label }))}
-            value={selectedNetwork.id}
-            onChange={(id) => {
-              const next = networks.find((network) => network.id === id)
-              if (next) setSelectedNetwork(next)
-            }}
-            label="Network"
-          />
+          <NetworkSettings />
         </Section>
       </ScrollView>
     </SafeAreaView>
+  )
+}
+
+const NETWORK_OPTIONS: { value: NetworkId; label: string }[] = [
+  { value: 'devnet', label: NETWORKS.devnet.label },
+  { value: 'mainnet', label: NETWORKS.mainnet.label },
+]
+
+/**
+ * Devnet (practice money) or Mainnet (real money). Switching to Mainnet asks first. The wallet
+ * login, the waiting requests, the daily limit and the trusted addresses are kept apart for each
+ * network, and a request for the other network is refused.
+ */
+function NetworkSettings() {
+  const { tokens } = useTheme()
+  const { network, info, setNetwork, rpcUrl, customRpc, setCustomRpc } = useNetwork()
+  const [rpcText, setRpcText] = useState(customRpc ?? '')
+  const [problem, setProblem] = useState<string | null>(null)
+
+  // Each network has its own RPC address.
+  useEffect(() => {
+    setRpcText(customRpc ?? '')
+    setProblem(null)
+  }, [customRpc, network])
+
+  function choose(next: NetworkId) {
+    if (next === network) return
+    if (next === 'devnet') {
+      setNetwork('devnet')
+      return
+    }
+    Alert.alert(
+      'Switch to Mainnet?',
+      'Real money. Transactions here are final.\n\nNod will ask your wallet to connect again, and it will only accept requests that are for Mainnet. Your limits and trusted addresses for Devnet do not carry over.',
+      [
+        { text: 'Stay on Devnet', style: 'cancel' },
+        { text: 'Use Mainnet', style: 'destructive', onPress: () => setNetwork('mainnet') },
+      ],
+    )
+  }
+
+  function saveRpc() {
+    if (!setCustomRpc(rpcText)) {
+      setProblem('Enter an https:// address, like https://my-rpc.example.com/key.')
+      return
+    }
+    setProblem(null)
+    Keyboard.dismiss()
+  }
+
+  return (
+    <View>
+      <Segmented options={NETWORK_OPTIONS} value={network} onChange={choose} label="Network" />
+      {info.realMoney ? (
+        <View accessibilityRole="alert" style={[styles.warning, { borderColor: tokens.warn }]}>
+          <Ionicons name="warning-outline" size={20} color={tokens.warn} />
+          <Text style={{ color: tokens.warn, flex: 1, fontSize: 15, fontWeight: '600' }}>
+            Real money. Transactions here are final.
+          </Text>
+        </View>
+      ) : (
+        <Label style={styles.help}>Devnet is practice money. Nothing here is worth anything.</Label>
+      )}
+      <View style={[styles.limitBlock, { borderTopColor: tokens.line }]}>
+        <Label>RPC address for {info.label}</Label>
+        <View style={styles.limitRow}>
+          <TextInput
+            accessibilityLabel={`RPC address for ${info.label}`}
+            value={rpcText}
+            onChangeText={(value) => {
+              setRpcText(value)
+              setProblem(null)
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder={info.rpc}
+            placeholderTextColor={tokens.muted}
+            returnKeyType="done"
+            onSubmitEditing={saveRpc}
+            style={[
+              styles.limitInput,
+              { color: tokens.text, borderColor: tokens.line, backgroundColor: tokens.raised, fontSize: 14 },
+            ]}
+          />
+          <NodButton
+            title="Save"
+            variant="secondary"
+            disabled={rpcText.trim() === (customRpc ?? '')}
+            onPress={saveRpc}
+          />
+        </View>
+        {problem ? (
+          <Text accessibilityRole="alert" style={{ color: tokens.danger, fontSize: 14 }}>
+            {problem}
+          </Text>
+        ) : null}
+        <Label>
+          {customRpc
+            ? 'Using your own address. Leave it empty to go back to the public one.'
+            : `Using the public address (${rpcUrl.replace(/^https:\/\//, '')}). Public servers can be slow or limited.`}{' '}
+          Before anything is signed, Nod checks that the server really is {info.label}.
+        </Label>
+      </View>
+    </View>
   )
 }
 
@@ -390,6 +487,15 @@ const styles = StyleSheet.create({
   limitBlock: { borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingVertical: 12 },
   limitRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   limitInput: { borderRadius: radius.panel, borderWidth: 1, flex: 1, fontSize: 18, height: 52, paddingHorizontal: 14 },
+  warning: {
+    alignItems: 'center',
+    borderRadius: radius.panel,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    marginVertical: 8,
+    padding: 12,
+  },
   knownRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   pairRow: { gap: 8, paddingTop: 4, paddingBottom: 12 },
   pairButton: { marginVertical: 12 },

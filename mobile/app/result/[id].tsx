@@ -64,7 +64,7 @@ export default function ResultScreen() {
     : entry.status === 'failed'
       ? entry.reason || 'Something went wrong.'
       : meta.note
-  const explorerUrl = entry.signature ? getExplorerUrl(`tx/${entry.signature}`) : null
+  const explorerUrl = entry.signature ? getExplorerUrl(`tx/${entry.signature}`, entry.network ?? 'devnet') : null
 
   async function copySignature() {
     if (!entry?.signature) return

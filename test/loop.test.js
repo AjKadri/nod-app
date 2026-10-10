@@ -435,9 +435,9 @@ test("review works through the same RPC wrapper the phone app uses", async () =>
   const wallet = Keypair.generate();
   rpc.airdrop(wallet.publicKey, LAMPORTS_PER_SOL);
   const review = await reviewRequest({
-    payload: { type: "transfer", to: newAddress(), lamports: 250_000_000, note: "rent", agent: "bot" },
+    payload: { type: "transfer", to: newAddress(), lamports: 250_000_000, note: "rent", agent: "bot", network: "devnet" },
     walletAddress: wallet.publicKey.toBase58(),
-    chain: rpcChain(connection),
+    chain: rpcChain(connection, "devnet"),
   });
   assert.equal(review.headline, "You send 0.250005 SOL (network fee included)");
   assert.equal(review.request.agent, "bot");

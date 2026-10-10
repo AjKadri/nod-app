@@ -10,6 +10,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { DEFAULT_NETWORK, parseNetwork } = require("../shared/network");
 
 const DEFAULT_RELAY = "http://localhost:8787";
 
@@ -64,7 +65,21 @@ function resolveAgentConnection({ env = process.env, relayArg } = {}) {
   return { relay, token };
 }
 
+/**
+ * The network the agent means: --network, else the NETWORK env var, else devnet. The phone refuses
+ * a request for a network other than its own, so a wrong value cannot move money, but a name that
+ * is not recognised is an error here instead of being guessed.
+ */
+function resolveNetwork({ env = process.env, arg } = {}) {
+  const raw = arg !== undefined && arg !== true ? arg : env.NETWORK;
+  if (raw === undefined || raw === "") return DEFAULT_NETWORK;
+  const network = parseNetwork(raw);
+  if (!network) throw new Error(`Unknown network "${raw}". Use devnet or mainnet.`);
+  return network;
+}
+
 module.exports = {
+  resolveNetwork,
   DEFAULT_RELAY,
   configDir,
   credentialsPath,

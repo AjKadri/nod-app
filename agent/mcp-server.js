@@ -10,7 +10,7 @@
  *   request_transaction  ask the phone to sign and send a transaction the agent built
  *
  * Setup: run `node agent/pair.js` once. The pairing it saves is used automatically.
- * Env (optional): RELAY_URL, RELAY_TOKEN, AGENT_NAME (shown on the phone), AGENT_ICON (a preset name such as
+ * Env (optional): NETWORK (devnet or mainnet, default devnet), RELAY_URL, RELAY_TOKEN, AGENT_NAME (shown on the phone), AGENT_ICON (a preset name such as
  *   code, terminal, sparkles, chat, search, globe, flash, cube, or one emoji), APPROVAL_TIMEOUT_SECONDS
  *
  * Example client config:
@@ -22,14 +22,16 @@ const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
 const { getWalletAddress, requestApproval } = require("./client");
-const { resolveAgentConnection } = require("./credentials");
+const { resolveAgentConnection, resolveNetwork } = require("./credentials");
 
 // RELAY_URL / RELAY_TOKEN, or else the pairing saved by `node agent/pair.js`.
 const { relay, token } = resolveAgentConnection();
 const agentName = (process.env.AGENT_NAME || "mcp-agent").slice(0, 60);
 const agentIcon = (process.env.AGENT_ICON || "").trim().slice(0, 32);
-// Who is asking, as the phone will show it.
-const identity = { agent: agentName, ...(agentIcon ? { agentIcon } : {}) };
+// NETWORK=devnet (default) or mainnet. Every request names it; the phone refuses one for the other network.
+const network = resolveNetwork();
+// Who is asking, as the phone will show it, and which network the request is for.
+const identity = { agent: agentName, network, ...(agentIcon ? { agentIcon } : {}) };
 const timeoutMs = Number(process.env.APPROVAL_TIMEOUT_SECONDS || 300) * 1000;
 
 const TOOLS = [

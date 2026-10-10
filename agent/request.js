@@ -11,12 +11,13 @@
  * do) and sends that. Use --hold 180 with "raw" to wait 3 minutes before
  * sending, which makes the blockhash stale on purpose (feasibility Test 4).
  *
- * Options: --relay URL  --rpc URL  --note TEXT  --timeout SECONDS  --hold SECONDS
+ * Options: --network devnet|mainnet (env NETWORK, default devnet)  --relay URL  --rpc URL  --note TEXT  --timeout SECONDS  --hold SECONDS
  *          --agent NAME  --icon NAME_OR_EMOJI   (how the phone shows this agent; env AGENT_NAME, AGENT_ICON)
  * Env:     RELAY_URL, RELAY_TOKEN, RPC_URL. Without them the pairing saved by agent/pair.js is used.
  */
 const { getWalletAddress, requestApproval, buildRawTransfer } = require("./client");
-const { resolveAgentConnection } = require("./credentials");
+const { resolveAgentConnection, resolveNetwork } = require("./credentials");
+const { NETWORKS } = require("../shared/network");
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -43,7 +44,13 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const mode = args._[0];
   const { relay, token } = resolveAgentConnection({ relayArg: typeof args.relay === "string" ? args.relay : undefined });
-  const rpc = args.rpc || process.env.RPC_URL || "https://api.devnet.solana.com";
+  let network;
+  try {
+    network = resolveNetwork({ arg: args.network });
+  } catch (err) {
+    fail(err.message);
+  }
+  const rpc = args.rpc || process.env.RPC_URL || NETWORKS[network].rpc;
   const timeoutMs = Number(args.timeout || 300) * 1000;
 
   if (mode !== "transfer" && mode !== "raw") {
@@ -56,7 +63,7 @@ async function main() {
   const note = typeof args.note === "string" ? args.note : `from laptop agent (${mode})`;
   const agent = String(typeof args.agent === "string" ? args.agent : process.env.AGENT_NAME || "laptop-script").slice(0, 60);
   const icon = String(typeof args.icon === "string" ? args.icon : process.env.AGENT_ICON || "").trim().slice(0, 32);
-  const identity = { agent, ...(icon ? { agentIcon: icon } : {}) };
+  const identity = { agent, network, ...(icon ? { agentIcon: icon } : {}) };
 
   let payload;
   if (mode === "transfer") {

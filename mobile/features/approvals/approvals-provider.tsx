@@ -13,12 +13,14 @@ import React, {
   useState,
 } from 'react'
 import { ApprovalsConfig } from '@/constants/approvals-config'
+import { useNetwork } from '@/features/network/use-network'
 import { tokenOf } from '@/features/pairing/pairing-store'
 import { usePairings } from '@/features/pairing/pairing-provider'
 import { useAutoStore } from './auto-store'
 import { buildDemo } from './demo-data'
 import { cleanAgentName, describeAgent, type AgentIcon } from './lib/agent'
 import { reviewRequest, type Review, type SignAndSend } from './lib/approval'
+import type { NetworkId } from './lib/network'
 import { addressToLearn, decideAutoApprove, isPausedForAuto, ledgerEntryFor, outflowLamports } from './lib/autoapprove'
 import { rpcChain } from './lib/chain'
 import {
@@ -63,6 +65,8 @@ export type HistoryEntry = {
   reason?: string
   /** Approved without the card, within the daily limit. */
   auto?: boolean
+  /** The network it was for. Absent in history saved before Mainnet existed: that was Devnet. */
+  network?: NetworkId
   /** False when the relay could not be told, so the agent may still be waiting. */
   reported: boolean
   at: number
@@ -193,6 +197,7 @@ function entryFor(item: Item, outcome: Outcome): HistoryEntry {
     signature: outcome.signature,
     reason: outcome.status === 'approved' ? undefined : outcome.reason,
     ...(outcome.auto ? { auto: true } : {}),
+    ...(item.review ? { network: item.review.network } : {}),
     reported: outcome.reported,
     at: Date.now(),
   }
@@ -206,7 +211,8 @@ function entryFor(item: Item, outcome: Outcome): HistoryEntry {
 export function ApprovalsProvider({ children }: PropsWithChildren) {
   const { account, connection, connect, signAndSendTransaction, signTransaction } = useMobileWallet()
   const address = account?.address.toString()
-  const chain = useMemo(() => rpcChain(connection), [connection])
+  const { network } = useNetwork()
+  const chain = useMemo(() => rpcChain(connection, network), [connection, network])
   const { pairings, forget } = usePairings()
   const relaysRef = useRef<Map<string, RelayClient>>(new Map())
   const itemsRef = useRef<Item[]>([])
@@ -219,7 +225,7 @@ export function ApprovalsProvider({ children }: PropsWithChildren) {
   const [pausedBy, setPausedBy] = useState<Record<string, boolean>>({})
   const [pauseBusy, setPauseBusy] = useState(false)
   // Auto-approve reads these at the moment it decides, so they are kept in refs as well as state.
-  const autoStore = useAutoStore()
+  const autoStore = useAutoStore(network)
   const autoApi = autoStore.api
   const pausedByRef = useRef<Record<string, boolean>>({})
   const pauseBusyRef = useRef(false)

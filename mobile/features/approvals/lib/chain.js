@@ -5,13 +5,43 @@
  * (real RPC) and in the laptop tests (local stand-in RPC).
  */
 
+const { NETWORKS } = require("./network");
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** @param connection a @solana/web3.js Connection */
-function rpcChain(connection) {
+/**
+ * @param connection a @solana/web3.js Connection
+ * @param {"devnet"|"mainnet"} network the network this connection is MEANT to be. verifyNetwork()
+ *   checks the server really is that network (by its genesis hash) before anything is signed.
+ */
+function rpcChain(connection, network) {
+  let verified = null;
   return {
+    network,
+
+    /**
+     * Throws unless the RPC server is the chain this phone is set to. A success is remembered; a
+     * failure (or an unreachable server) is not, so it is checked again next time.
+     */
+    async verifyNetwork() {
+      const expected = NETWORKS[network];
+      if (!expected) throw networkError("no_network", "Unknown network.");
+      if (verified) return verified;
+      let genesis;
+      try {
+        genesis = await connection.getGenesisHash();
+      } catch (err) {
+        throw networkError("network_unreachable", `Could not check which network the RPC server is on (${err && err.message ? err.message : err}). Nothing was signed.`);
+      }
+      if (genesis !== expected.genesisHash) {
+        throw networkError("wrong_cluster", `The RPC server for ${expected.label} is not ${expected.label}. Nothing was signed. Check the RPC address in Settings.`);
+      }
+      verified = Promise.resolve(true);
+      return verified;
+    },
+
     /** Blockhash plus the slot it was fetched at (the wallet wants the slot). */
     async getLatestBlockhash() {
       const { context, value } = await connection.getLatestBlockhashAndContext();
@@ -75,6 +105,12 @@ function rpcChain(connection) {
       return { confirmed: false, err: "timeout" };
     },
   };
+}
+
+/** An ApprovalError, loaded lazily because approval.js requires this file's siblings. */
+function networkError(code, message) {
+  const { ApprovalError } = require("./approval");
+  return new ApprovalError(code, message);
 }
 
 module.exports = { rpcChain };

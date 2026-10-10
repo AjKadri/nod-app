@@ -1,13 +1,27 @@
 import type { PublicKey, VersionedMessage, VersionedTransaction } from '@solana/web3.js'
 import type { Chain } from './chain'
+import type { NetworkId } from './network'
 
 export class ApprovalError extends Error {
   code: string
   constructor(code: string, message: string)
 }
 
-export type TransferPayload = { type: 'transfer'; to: string; lamports: number; note: string; agent: string }
-export type RawPayload = { type: 'raw'; transactionBase64: string; note: string; agent: string }
+export type TransferPayload = {
+  type: 'transfer'
+  to: string
+  lamports: number
+  note: string
+  agent: string
+  network?: NetworkId
+}
+export type RawPayload = {
+  type: 'raw'
+  transactionBase64: string
+  note: string
+  agent: string
+  network?: NetworkId
+}
 export type RequestPayload = TransferPayload | RawPayload
 
 export type Summary = {
@@ -31,6 +45,8 @@ export type Preview = {
 
 export type Review = {
   request: RequestPayload
+  /** The network this phone was on when it reviewed the request. */
+  network: NetworkId
   summary: Summary
   preview: Preview
   /** One sentence for the screen, e.g. "You send 0.001005 SOL (network fee included)". */
@@ -45,6 +61,7 @@ export type SignAndSend = (transaction: VersionedTransaction, minContextSlot: nu
 export const KNOWN_PROGRAMS: Record<string, string>
 export const LAMPORTS_PER_SOL: number
 export function validateRequest(payload: unknown): RequestPayload
+export function assertNetwork(request: RequestPayload, chain: Chain): Promise<void>
 export function prepareTransaction(
   payload: unknown,
   walletAddress: PublicKey | string,

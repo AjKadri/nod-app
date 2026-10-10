@@ -18,7 +18,7 @@ import { timeAgo } from '@/utils/format'
 export function InboxScreen() {
   const { tokens } = useTheme()
   const router = useRouter()
-  const { selectedNetwork } = useNetwork()
+  const { info } = useNetwork()
   const { items, history, relayStatus, reconnectRelay, demo } = useApprovals()
   const { pairings, notice, dismissNotice } = usePairings()
   const now = useNow()
@@ -30,7 +30,7 @@ export function InboxScreen() {
         <Wordmark />
         <View style={styles.headerRight}>
           {demo ? <DemoPill /> : null}
-          <NetworkPill label={selectedNetwork.label} />
+          <NetworkPill label={info.label} realMoney={info.realMoney} />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Settings"
@@ -174,6 +174,9 @@ function HistoryRow({ entry, now, onPress }: { entry: HistoryEntry; now: number;
         <View style={styles.statusLine}>
           <Ionicons name={meta.icon} size={14} color={color} />
           <Text style={{ color, fontSize: 13 }}>{label}</Text>
+          {entry.network === 'mainnet' ? (
+            <Text style={{ color: tokens.warn, fontSize: 13, fontWeight: '600' }}>· Mainnet</Text>
+          ) : null}
         </View>
       </View>
       <View style={styles.rowEnd}>

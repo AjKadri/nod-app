@@ -11,6 +11,8 @@ const {
   VersionedTransaction,
 } = require("@solana/web3.js");
 
+const { DEFAULT_NETWORK } = require("../shared/network");
+
 const POLL_WAIT_SECONDS = 25;
 
 function headers(token) {
@@ -47,12 +49,15 @@ async function getWalletAddress({ relay, token = "" }) {
 /**
  * Send a request to the phone and wait until it is approved, denied, failed or expired.
  * If nobody answers within timeoutMs the request is withdrawn from the phone.
+ * @param network "devnet" (default) or "mainnet": which network the request is for.
  * @param payload { type: "transfer", to, lamports, note?, agent?, agentIcon? } or { type: "raw", transactionBase64, note?, agent?, agentIcon? }
  * Throws an error with `code: "paused"` if the user has paused approvals on the phone.
  * @returns {{ id, status, result }} status is approved | denied | failed | expired | timeout
  */
-async function requestApproval({ relay, token = "", payload, timeoutMs = 5 * 60 * 1000, onCreated }) {
+async function requestApproval({ relay, token = "", payload, network = DEFAULT_NETWORK, timeoutMs = 5 * 60 * 1000, onCreated }) {
   const deadline = Date.now() + timeoutMs;
+  // Every request names its network. A payload that already says so keeps its own.
+  if (!payload.network) payload = { ...payload, network };
   let request = await readJson(
     await fetch(`${relay}/requests`, { method: "POST", headers: headers(token), body: JSON.stringify(payload) })
   );
