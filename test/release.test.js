@@ -333,3 +333,15 @@ test("publish-apk: needs a server, and refuses odd repo or folder names before c
   assert.notEqual(odd.status, 0);
   assert.equal(odd.calls, "");
 });
+
+test("links: the X page, GitHub and the site are the same in the site, the README and Settings → About", () => {
+  const settings = read("mobile", "constants", "app-config.ts");
+  const readme = read("README.md");
+  const site = read("site", "index.html");
+  for (const url of ["https://x.com/nod_app", "https://github.com/AjKadri/nod-app"]) {
+    assert.ok(settings.includes(url), `app-config.ts has ${url}`);
+    assert.ok(readme.includes(url), `README has ${url}`);
+    assert.ok(site.includes(url), `site has ${url}`);
+  }
+  assert.match(read("mobile", "app", "settings.tsx"), /<Section title="About">/);
+});

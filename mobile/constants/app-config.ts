@@ -14,4 +14,10 @@ export const WALLET_IDENTITY = {
 export class AppConfig {
   static name = WALLET_IDENTITY.name
   static uri = WALLET_IDENTITY.uri
+  /** Where Settings → About sends people. */
+  static links = {
+    website: { label: 'Website', url: WALLET_IDENTITY.uri },
+    github: { label: 'GitHub', url: 'https://github.com/AjKadri/nod-app' },
+    x: { label: 'X (@nod_app)', url: 'https://x.com/nod_app' },
+  } as const
 }

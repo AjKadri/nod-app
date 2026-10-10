@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons'
 import { useMobileWallet } from '@wallet-ui/react-native-web3js'
+import Constants from 'expo-constants'
 import { useRouter, type Href } from 'expo-router'
 import React, { useEffect, useState } from 'react'
 import {
@@ -18,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { TokenLogo } from '@/components/token-logo'
 import { DetailRow, Eyebrow, Label, NodButton } from '@/components/ui'
+import { AppConfig } from '@/constants/app-config'
 import { radius, space, type ThemePreference } from '@/constants/theme'
 import { useApprovals, type AutoTokenView } from '@/features/approvals/approvals-provider'
 import { formatSol } from '@/features/approvals/lib/approval'
@@ -185,8 +187,40 @@ export default function SettingsScreen() {
         <Section title="Network">
           <NetworkSettings />
         </Section>
+
+        <Section title="About">
+          <About />
+        </Section>
       </ScrollView>
     </SafeAreaView>
+  )
+}
+
+/** The version, and where to find Nod on the web. Links open in the browser. */
+function About() {
+  const version = Constants.expoConfig?.version
+  const build = Constants.expoConfig?.android?.versionCode
+  const links = [AppConfig.links.website, AppConfig.links.github, AppConfig.links.x]
+  return (
+    <View>
+      <DetailRow
+        label="Nod"
+        value={version ? `${version}${build ? ` (build ${build})` : ''}` : 'Unknown version'}
+        last
+      />
+      <View style={styles.aboutLinks}>
+        {links.map((link) => (
+          <NodButton
+            key={link.url}
+            title={link.label}
+            variant="secondary"
+            onPress={() => Linking.openURL(link.url).catch(() => {})}
+            accessibilityHint={`Opens ${link.url.replace(/^https:\/\//, '')} in your browser`}
+          />
+        ))}
+      </View>
+      <Label style={styles.help}>Open source, MIT licensed. Not audited: use amounts you can afford to lose.</Label>
+    </View>
   )
 }
 
@@ -549,6 +583,7 @@ const styles = StyleSheet.create({
   switchText: { flex: 1, gap: 2 },
   inline: { alignSelf: 'flex-start', paddingHorizontal: 0 },
   help: { paddingBottom: 12, paddingTop: 12 },
+  aboutLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingVertical: 12 },
   limitBlock: { borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingVertical: 12 },
   limitRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   limitInput: { borderRadius: radius.panel, borderWidth: 1, flex: 1, fontSize: 18, height: 52, paddingHorizontal: 14 },
