@@ -179,7 +179,8 @@ test("site: one page with the wordmark, the line, three steps, a download link a
   assert.match(html, /Your agent asks\. You nod\./);
   assert.match(html, /class="wordmark"[^>]*>nod<span>\.<\/span>/);
   assert.equal((html.match(/<li>/g) || []).length, 3);
-  assert.match(html, /href="https:\/\/github\.com\/AjKadri\/nod-app\/raw\/build-artifacts\/nod\.apk"/);
+  assert.match(html, /href="\/nod\.apk"/, "the APK is served from the VPS, not from the private repo");
+  assert.doesNotMatch(html, /raw\/build-artifacts/);
   assert.match(html, /id="demo"/);
   assert.match(html, /prefers-color-scheme: dark/);
   assert.doesNotMatch(html, /<script|https?:\/\/[^"' ]*(fonts|cdn)\./i, "nothing is loaded from other sites");
@@ -207,4 +208,70 @@ test("installer: the site bundle check sees a stale copy", () => {
     fs.unlinkSync(stale);
   }
   execFileSync(process.execPath, [path.join(ROOT, "scripts", "vps-bundle.js"), "--check"], { stdio: "pipe" });
+});
+
+// ---------------------------------------------------------------- publishing the APK
+
+/** Run publish-apk.sh with stand-ins for gh, scp and ssh that record what they were asked to do. */
+function runPublish({ apkBytes = 2_000_000, tamper = false, extraEnv = {} } = {}) {
+  const os = require("node:os");
+  const crypto = require("node:crypto");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nod-publish-"));
+  const bin = path.join(dir, "bin");
+  fs.mkdirSync(bin);
+  const apk = Buffer.alloc(apkBytes, 7);
+  const sum = crypto.createHash("sha256").update(tamper ? Buffer.from("other") : apk).digest("hex");
+  fs.writeFileSync(path.join(dir, "nod.apk"), apk);
+  fs.writeFileSync(path.join(dir, "SHA256SUMS"), `${sum}  nod.apk\n${"0".repeat(64)}  mock-wallet.apk\n`);
+  fs.writeFileSync(path.join(dir, "BUILD.txt"), "Built from abc123 by run 9\n");
+  const log = path.join(dir, "calls.log");
+  const stub = (name, body) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+  };
+  stub("gh", `echo "gh $*" >> "${log}"
+case "$1" in
+  auth) exit 0 ;;
+  repo) echo "me/private-repo" ;;
+  api) f="\${@: -1}"; f="\${f#*contents/}"; f="\${f%%\\?*}"; cat "${dir}/$f" ;;
+esac`);
+  stub("scp", `echo "scp $*" >> "${log}"; for last; do :; done; cp "\${@: -2:1}" "${dir}/uploaded-$(basename "\${@: -1}")"`);
+  stub("ssh", `echo "ssh $*" >> "${log}"`);
+  let status = 0;
+  let output = "";
+  try {
+    output = execFileSync("bash", [path.join(ROOT, "scripts", "publish-apk.sh"), "root@example.org"], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extraEnv },
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+  } catch (error) {
+    status = error.status;
+    output = `${error.stdout}${error.stderr}`;
+  }
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "";
+  return { status, output, calls, dir, sum };
+}
+
+test("publish-apk: downloads from the private repo's build-artifacts branch and puts it on the server in one swap", () => {
+  const { status, calls, dir, sum } = runPublish();
+  assert.equal(status, 0);
+  assert.match(calls, /gh api .*repos\/me\/private-repo\/contents\/nod\.apk\?ref=build-artifacts/);
+  assert.match(calls, /scp .*\/nod\.apk root@example\.org:\/var\/www\/nod\/\.nod\.apk\.new/);
+  assert.match(calls, /ssh root@example\.org .*mv -f \.nod\.apk\.new nod\.apk/);
+  // The site lists only the file it serves.
+  assert.equal(fs.readFileSync(path.join(dir, "uploaded-.SHA256SUMS.new"), "utf8"), `${sum}  nod.apk\n`);
+});
+
+test("publish-apk: a download that does not match its checksum is never uploaded", () => {
+  const { status, output, calls } = runPublish({ tamper: true });
+  assert.notEqual(status, 0);
+  assert.match(output, /does not match SHA256SUMS/);
+  assert.doesNotMatch(calls, /scp|ssh/);
+});
+
+test("publish-apk: a tiny file is never uploaded, and the server can be named by environment", () => {
+  const tiny = runPublish({ apkBytes: 100 });
+  assert.notEqual(tiny.status, 0);
+  assert.doesNotMatch(tiny.calls, /scp/);
+  assert.throws(() => execFileSync("bash", [path.join(ROOT, "scripts", "publish-apk.sh")], { env: { ...process.env, NOD_SERVER: "" }, stdio: "pipe" }));
 });

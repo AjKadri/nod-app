@@ -42,6 +42,14 @@ ssh root@<server> 'bash setup.sh relay.ajkadri.dev nod.ajkadri.dev'
 
 Run it again after any change to `relay/` or `site/`: it updates both, keeps the registration key and the relay's state, and remembers the site domain. `npm test` and CI fail if the copies inside `setup.sh` are out of date; the fix is `node scripts/vps-bundle.js`, then commit.
 
+**Publishing the APK.** The repo is private, so the page's download button points at `/nod.apk` on the server itself. After a CI build finishes (and `gh auth login` once on your Mac):
+
+```sh
+bash scripts/publish-apk.sh root@relay.ajkadri.dev
+```
+
+It downloads the latest `nod.apk` from the `build-artifacts` branch with `gh`, checks it against `SHA256SUMS`, copies it to `/var/www/nod` with `scp`, and swaps it in place in one step. Running `setup.sh` again keeps the APK.
+
 The page is `site/index.html` (a demo video goes in the marked slot; a `demo.mp4` you put in `/var/www/nod/` on the server survives re-runs). Check the app link file with `curl https://nod.ajkadri.dev/.well-known/assetlinks.json`: it must list your fingerprint.
 
 ## What the wallet sees
