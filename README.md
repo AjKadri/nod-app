@@ -84,7 +84,7 @@ If the phone cannot reach the relay: check `adb reverse --list`, and `curl http:
 
 ### Connecting a real agent (Test 8)
 
-Add this to the agent's MCP config, with the real path:
+One short guide per agent, with the exact commands: [Claude Code](docs/agents/claude-code.md), [Cursor](docs/agents/cursor.md), [Codex](docs/agents/codex.md), [OpenClaw](docs/agents/openclaw.md). For any other MCP client, add this to its MCP config, with the real path:
 
 ```json
 {
