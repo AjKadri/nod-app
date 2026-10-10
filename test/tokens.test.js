@@ -26,7 +26,7 @@ const { reviewRequest, approveRequest, validateRequest } = require("../shared/ap
 const { presentReview } = require("../shared/present");
 const { rpcChain } = require("../shared/chain");
 const tokens = require("../shared/tokens");
-const { createMint, giveTokens, tokenBalance, tokenAccountBytes } = require("./helpers/tokens");
+const { createMint, giveTokens, tokenBalance } = require("./helpers/tokens");
 
 const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } = tokens;
 
@@ -317,9 +317,6 @@ test("a token approval (delegation) is a red warning even though no balance move
   assert.equal(presented.risky, true);
   assert.ok(presented.warnings.some((x) => x.level === "danger" && /lets another address spend your tokens/.test(x.text)));
   assert.notEqual(presented.action, "Token transfer");
-  // The instruction names it and the simulation shows it: the card says it once.
-  assert.equal(presented.warnings.filter((x) => /lets another address spend your tokens/.test(x.text)).length, 1);
-  assert.deepEqual(presented.tokenAlerts, [tokens.DANGER_SPEND]);
 });
 
 test("handing a token account to someone else shows as the full balance leaving", async () => {
@@ -409,157 +406,6 @@ test("a lookup table that cannot be read means Nod says it cannot see every acco
   const { presentReview: present } = require("../shared/present");
   const shown = present({ request: { type: "raw", note: "" }, network: "devnet", summary: { programs: [], transfers: [], tokenInstructions: [], tokenDangers: [], unknownPrograms: [], instructionCount: 1, signerCount: 1, usesLookupTables: true }, preview: result, refreshable: true, signerCount: 1 });
   assert.ok(shown.warnings.some((w) => w.level === "danger" && /could not check every account/.test(w.text)));
-});
-
-// ---------------------------------------------------------------- who else has a say over the wallet's token accounts
-
-const SPEND = tokens.DANGER_SPEND;
-const CONTROL = tokens.DANGER_CONTROL;
-
-/** The warnings diffTokenAccounts raises when the wallet's account goes from `before` to `after`. */
-function controlDangers(before, after, { wallet = newAddress(), mint = newAddress(), beforeOwner } = {}) {
-  const key = Keypair.generate().publicKey;
-  const account = (fields, owner) => ({ lamports: 2_039_280, owner: TOKEN_PROGRAM_ID, data: tokenAccountBytes({ mint, owner, ...fields }) });
-  const pre = before === null ? null : account(before, beforeOwner || wallet);
-  const post = after === null ? null : account(after, after.owner || wallet);
-  return tokens.diffTokenAccounts({ keys: [key], pre: [pre], post: [post], wallet }).dangers;
-}
-
-test("token accounts: a delegate that is new or different, or a bigger allowance, is 'lets another address spend your tokens'", () => {
-  const stranger = newAddress();
-  assert.deepEqual(controlDangers({ amount: 5n }, { amount: 5n, delegate: stranger, delegatedAmount: 5n }), [SPEND]);
-  assert.deepEqual(controlDangers({ amount: 5n, delegate: newAddress(), delegatedAmount: 5n }, { amount: 5n, delegate: stranger, delegatedAmount: 5n }), [SPEND], "a different delegate");
-  assert.deepEqual(controlDangers({ amount: 5n, delegate: stranger, delegatedAmount: 1n }, { amount: 5n, delegate: stranger, delegatedAmount: 5n }), [SPEND], "same delegate, bigger allowance");
-  assert.deepEqual(controlDangers({ amount: 5n, delegate: stranger, delegatedAmount: 5n }, { amount: 5n, delegate: stranger, delegatedAmount: 2n }), [SPEND], "an allowance that changed at all is flagged while a delegate remains");
-  assert.deepEqual(controlDangers({ amount: 5n }, { amount: 5n, delegate: stranger, delegatedAmount: 5n }, { beforeOwner: newAddress() }), [SPEND], "an account that becomes the wallet's with a stranger as delegate");
-});
-
-test("token accounts: changes that give no one else a say are not flagged", () => {
-  const stranger = newAddress();
-  const wallet = newAddress();
-  assert.deepEqual(controlDangers({ amount: 9n }, { amount: 4n }), [], "an ordinary transfer out");
-  assert.deepEqual(controlDangers({ amount: 5n, delegate: stranger, delegatedAmount: 5n }, { amount: 5n, delegate: stranger, delegatedAmount: 5n }), [], "an old delegate that did not change");
-  assert.deepEqual(controlDangers({ amount: 5n, delegate: stranger, delegatedAmount: 5n }, { amount: 5n }), [], "revoking a delegate");
-  assert.deepEqual(controlDangers({ amount: 5n, closeAuthority: stranger }, { amount: 5n }), [], "removing a close authority");
-  assert.deepEqual(controlDangers({ amount: 5n }, { amount: 5n, delegate: wallet, delegatedAmount: 5n }, { wallet }), [], "a delegate that is the wallet itself");
-  assert.deepEqual(controlDangers({ amount: 5n }, { amount: 5n, closeAuthority: wallet }, { wallet }), [], "a close authority that is the wallet itself");
-  assert.deepEqual(controlDangers({ amount: 5n }, null), [], "closing an account");
-  assert.deepEqual(controlDangers(null, { amount: 0n }), [], "a new, empty account");
-  // Someone else's account is not the wallet's business.
-  const key = Keypair.generate().publicKey;
-  const mint = newAddress();
-  const owner = newAddress();
-  const pre = { lamports: 1, owner: TOKEN_PROGRAM_ID, data: tokenAccountBytes({ mint, owner, amount: 5n }) };
-  const post = { lamports: 1, owner: TOKEN_PROGRAM_ID, data: tokenAccountBytes({ mint, owner, amount: 5n, delegate: stranger, delegatedAmount: 5n }) };
-  assert.deepEqual(tokens.diffTokenAccounts({ keys: [key], pre: [pre], post: [post], wallet: newAddress() }).dangers, [], "another person's account");
-});
-
-test("token accounts: a close authority that is new or different, or a new owner, is 'changes who controls'", () => {
-  const stranger = newAddress();
-  assert.deepEqual(controlDangers({ amount: 5n }, { amount: 5n, closeAuthority: stranger }), [CONTROL]);
-  assert.deepEqual(controlDangers({ amount: 5n, closeAuthority: newAddress() }, { amount: 5n, closeAuthority: stranger }), [CONTROL]);
-  assert.deepEqual(controlDangers({ amount: 5n }, { amount: 5n, owner: stranger }), [CONTROL], "the account now belongs to someone else");
-  assert.deepEqual(controlDangers({ amount: 5n }, { amount: 5n, owner: stranger, delegate: stranger, delegatedAmount: 5n }).sort(), [CONTROL, SPEND].sort(), "both can be said at once");
-});
-
-test("token accounts: Token-2022 accounts with extensions are read the same way", () => {
-  const stranger = newAddress();
-  const wallet = newAddress();
-  const mint = newAddress();
-  const key = Keypair.generate().publicKey;
-  const make = (fields) => ({ lamports: 1, owner: TOKEN_2022_PROGRAM_ID, data: tokenAccountBytes({ mint, owner: wallet, extension: true, ...fields }) });
-  const result = tokens.diffTokenAccounts({ keys: [key], pre: [make({ amount: 5n })], post: [make({ amount: 5n, delegate: stranger, delegatedAmount: 1n })], wallet });
-  assert.deepEqual(result.dangers, [SPEND]);
-});
-
-/**
- * A chain whose simulation says what a program that Nod does not know would leave behind: the
- * wallet's token account with `change` applied. The stand-in Solana runtime has no such program, so
- * the post-state is written by hand; everything that READS it (the review, the card) is the real code.
- */
-function chainWhere(ata, change) {
-  return {
-    ...chain,
-    simulate: async (_transaction, publicKey, watch = []) => {
-      const now = await chain.getAccounts(watch);
-      const accounts = now.map((account, index) => (account && watch[index].toBase58() === ata ? { ...account, data: change(account.data) } : account));
-      return { err: null, postLamports: await chain.getBalance(publicKey), logs: ["Program unknown invoke [1]", "Program unknown success"], accounts };
-    },
-  };
-}
-
-function withFields(fields) {
-  return (data) => {
-    const bytes = Buffer.from(data);
-    if (fields.delegate) {
-      bytes.writeUInt32LE(1, 72);
-      new PublicKey(fields.delegate).toBuffer().copy(bytes, 76);
-      bytes.writeBigUInt64LE(fields.delegatedAmount ?? 0n, 121);
-    }
-    if (fields.closeAuthority) {
-      bytes.writeUInt32LE(1, 129);
-      new PublicKey(fields.closeAuthority).toBuffer().copy(bytes, 133);
-    }
-    if (fields.owner) new PublicKey(fields.owner).toBuffer().copy(bytes, 32);
-    return new Uint8Array(bytes);
-  };
-}
-
-async function unknownProgramReview(w, mint, change) {
-  const ata = tokens.associatedTokenAddress(w.address, mint, TOKEN_PROGRAM_ID);
-  const unknown = Keypair.generate().publicKey; // a program Nod has never heard of
-  const call = new TransactionInstruction({
-    programId: unknown,
-    keys: [
-      { pubkey: ata, isSigner: false, isWritable: true },
-      { pubkey: new PublicKey(w.address), isSigner: true, isWritable: false },
-    ],
-    data: Buffer.from([1, 2, 3]),
-  });
-  const payload = await rawTokenTx(w.address, [call]);
-  const real = await reviewRequest({ payload, walletAddress: w.address, chain: chainWhere(ata.toBase58(), change) });
-  return presentReview(real);
-}
-
-test("an unknown program that sets a delegate on the wallet's token account is a red warning, whatever the instruction looked like", async () => {
-  const mint = createMint(rpc, { decimals: 6 });
-  const w = wallet({ mint });
-  const presented = await unknownProgramReview(w, mint, withFields({ delegate: newAddress(), delegatedAmount: 18446744073709551615n }));
-  // Nothing in the instruction says "approve": it is a program Nod does not recognise.
-  assert.ok(presented.warnings.some((x) => /program this app does not recognise/.test(x.text)));
-  assert.ok(presented.warnings.some((x) => x.level === "danger" && x.text === SPEND), JSON.stringify(presented.warnings));
-  assert.deepEqual(presented.tokenAlerts, [SPEND], "on the card itself, once");
-  assert.equal(presented.risky, true);
-  assert.equal(presented.warnings.filter((x) => x.text === SPEND).length, 1);
-});
-
-test("an unknown program that sets a close authority or hands the account over says 'changes who controls'", async () => {
-  const mint = createMint(rpc, { decimals: 6 });
-  const w = wallet({ mint });
-  const closer = await unknownProgramReview(w, mint, withFields({ closeAuthority: newAddress() }));
-  assert.deepEqual(closer.tokenAlerts, [CONTROL]);
-  const handedOver = await unknownProgramReview(w, mint, withFields({ owner: newAddress() }));
-  assert.ok(handedOver.warnings.some((x) => x.level === "danger" && x.text === CONTROL));
-});
-
-test("an unknown program that leaves the token accounts alone adds no token warning", async () => {
-  const mint = createMint(rpc, { decimals: 6 });
-  const w = wallet({ mint });
-  const presented = await unknownProgramReview(w, mint, (data) => data);
-  assert.deepEqual(presented.tokenAlerts, []);
-  assert.ok(!presented.warnings.some((x) => x.text === SPEND || x.text === CONTROL));
-});
-
-test("auto-approve never treats a transfer as plain when the simulation shows a delegate was set", async () => {
-  const { tokenTransfer } = require("../shared/autoapprove");
-  const mint = createMint(rpc, { decimals: 6 });
-  const w = wallet({ mint });
-  const to = newAddress();
-  giveTokens(rpc, { owner: to, mint, amount: 1n });
-  const real = await review(tokenPayload(mint, to, "5"), w.address);
-  assert.ok(tokenTransfer(real, w.address), "a plain transfer is plain");
-  const tampered = { ...real, preview: { ...real.preview, tokens: { ...real.preview.tokens, dangers: [SPEND] } } };
-  assert.equal(tokenTransfer(tampered, w.address), null);
 });
 
 // ---------------------------------------------------------------- agent tools

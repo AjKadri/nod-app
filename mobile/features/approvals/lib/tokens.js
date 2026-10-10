@@ -24,10 +24,6 @@ const USDC_MINT = { mainnet: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", dev
 /** Most accounts one simulation is asked about. */
 const MAX_WATCHED_ACCOUNTS = 100;
 
-/** The two red warnings for token accounts changing hands or being opened to someone else. */
-const DANGER_SPEND = "This transaction lets another address spend your tokens.";
-const DANGER_CONTROL = "This transaction changes who controls a token account or a token.";
-
 const isTokenProgram = (id) => id === TOKEN_PROGRAM_ID || id === TOKEN_2022_PROGRAM_ID;
 
 // ------------------------------------------------------------------ who is who
@@ -120,17 +116,9 @@ function readU64LE(bytes, offset) {
   return value;
 }
 
-/** An optional address in a token account: a 4 byte flag, then the 32 byte address. Null when unset. */
-function readOptionalKey(data, offset) {
-  const flag = data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24);
-  return flag === 1 ? new PublicKey(data.slice(offset + 4, offset + 36)).toBase58() : null;
-}
-
 /**
- * A token account's mint, owner, balance and who else has a say over it, or null if the bytes are
- * not a token account of that program. `programId` is the program that owns the account.
- *   delegate / delegatedAmount: another address allowed to spend up to that amount (null / 0n if none)
- *   closeAuthority: another address allowed to close the account (null if none)
+ * A token account's mint, owner and balance, or null if the bytes are not a token account of that
+ * program. `programId` is the program that owns the account.
  */
 function parseTokenAccount(data, programId) {
   if (!data || !isTokenProgram(programId)) return null;
@@ -142,9 +130,6 @@ function parseTokenAccount(data, programId) {
     mint: new PublicKey(data.slice(0, 32)).toBase58(),
     owner: new PublicKey(data.slice(32, 64)).toBase58(),
     amount: readU64LE(data, 64),
-    delegate: readOptionalKey(data, 72),
-    delegatedAmount: readU64LE(data, 121),
-    closeAuthority: readOptionalKey(data, 129),
   };
 }
 
@@ -215,7 +200,6 @@ function readToken2022Symbol(account, mint) {
  * @param post   the account at each address after the simulation, same shape
  * @param wallet base58 address of this phone's wallet
  * @returns {{
- *   dangers: string[],  // red warnings: an account of the wallet opened to someone else, however it happened
  *   changes: { mint: string, preRaw: string, postRaw: string, deltaRaw: string }[],
  *   others: { account: string, owner: string, mint: string, deltaRaw: string }[],
  *   created: { address: string, owner: string, mint: string, rentLamports: number, own: boolean }[],
@@ -227,8 +211,6 @@ function diffTokenAccounts({ keys, pre, post, wallet }) {
   const mine = new Map();
   const others = [];
   const created = [];
-  const dangers = [];
-  const warn = (text) => void (dangers.includes(text) || dangers.push(text));
   for (let i = 0; i < keys.length; i += 1) {
     const before = pre[i] || null;
     const after = post[i] || null;
@@ -247,20 +229,6 @@ function diffTokenAccounts({ keys, pre, post, wallet }) {
     if (a1 && a1.owner === wallet) entry.post += amount1;
     mine.set(mint, entry);
 
-    // Compare the wallet's own accounts before and after, whatever program did it (a program Nod
-    // does not know can change these as well as the token program can). Only changes that give
-    // someone else a say are flagged: taking a delegate or close authority away is not.
-    if ((a0 && a0.owner === wallet) || (a1 && a1.owner === wallet)) {
-      const wasMine = !!a0 && a0.owner === wallet;
-      const before = a0 || { delegate: null, delegatedAmount: 0n, closeAuthority: null };
-      if (a1) {
-        const gaveDelegate = a1.delegate !== null && a1.delegate !== wallet && (a1.delegate !== before.delegate || a1.delegatedAmount !== before.delegatedAmount);
-        if (gaveDelegate) warn(DANGER_SPEND);
-        if (a1.closeAuthority !== null && a1.closeAuthority !== wallet && a1.closeAuthority !== before.closeAuthority) warn(DANGER_CONTROL);
-        if (wasMine && a1.owner !== wallet) warn(DANGER_CONTROL);
-      }
-    }
-
     const owner = (a1 || a0).owner;
     if (owner !== wallet && amount1 !== amount0) {
       others.push({ account: address, owner, mint, deltaRaw: (amount1 - amount0).toString() });
@@ -274,7 +242,7 @@ function diffTokenAccounts({ keys, pre, post, wallet }) {
     if (entry.pre === entry.post) continue;
     changes.push({ mint, preRaw: entry.pre.toString(), postRaw: entry.post.toString(), deltaRaw: (entry.post - entry.pre).toString() });
   }
-  return { changes, others, created, dangers };
+  return { changes, others, created };
 }
 
 /**
@@ -313,11 +281,10 @@ async function transactionAccountKeys(chain, transaction) {
  * Never throws: a problem is reported as `complete: false`.
  */
 async function describeTokenChanges({ chain, keys, pre, post, wallet, complete }) {
-  const result = { complete, changes: [], others: [], created: [], dangers: [], error: null };
+  const result = { complete, changes: [], others: [], created: [], error: null };
   try {
     const diff = diffTokenAccounts({ keys, pre, post, wallet });
     result.created = diff.created;
-    result.dangers = diff.dangers;
     const mints = [...new Set([...diff.changes.map((c) => c.mint), ...diff.others.map((o) => o.mint)])];
     const mintInfo = new Map();
     if (mints.length > 0) {
@@ -359,8 +326,8 @@ function classifyTokenInstruction(programId, data) {
     const tag = data.length > 0 ? data[0] : -1;
     if (tag === 3 && data.length === 9) return { kind: "transfer" };
     if (tag === 12 && data.length === 10) return { kind: "transfer" };
-    if (tag === 4 || tag === 13) return { kind: "dangerous", danger: DANGER_SPEND };
-    if (tag === 6) return { kind: "dangerous", danger: DANGER_CONTROL };
+    if (tag === 4 || tag === 13) return { kind: "dangerous", danger: "This transaction lets another address spend your tokens." };
+    if (tag === 6) return { kind: "dangerous", danger: "This transaction changes who controls a token account or a token." };
     return { kind: "other" };
   }
   if (programId === ASSOCIATED_TOKEN_PROGRAM_ID) {
@@ -421,8 +388,6 @@ module.exports = {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   METAPLEX_METADATA_PROGRAM_ID,
-  DANGER_SPEND,
-  DANGER_CONTROL,
   SKR_MINT,
   USDC_MINT,
   MAX_WATCHED_ACCOUNTS,
