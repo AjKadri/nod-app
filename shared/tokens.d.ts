@@ -25,6 +25,8 @@ export type TokenView = {
   others: TokenOther[]
   /** Token accounts this transaction creates. */
   created: { address: string; mint: string; owner: string; own: boolean; rentLamports: number }[]
+  /** Red warnings: an account of the wallet was opened to another address (delegate, close authority) or handed over. */
+  dangers: string[]
   error: string | null
 }
 
@@ -32,6 +34,8 @@ export const TOKEN_PROGRAM_ID: string
 export const TOKEN_2022_PROGRAM_ID: string
 export const ASSOCIATED_TOKEN_PROGRAM_ID: string
 export const METAPLEX_METADATA_PROGRAM_ID: string
+export const DANGER_SPEND: string
+export const DANGER_CONTROL: string
 export const SKR_MINT: string
 export const USDC_MINT: { mainnet: string; devnet: string }
 export const MAX_WATCHED_ACCOUNTS: number

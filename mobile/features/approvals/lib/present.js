@@ -275,7 +275,11 @@ function presentReview(review) {
     warnings.push({ level: "danger", text });
     tokenAlerts.push(text);
   }
-  for (const text of summary.tokenDangers || []) {
+  // Said once each: the instruction can name a danger (approve, set authority) and the simulation
+  // can show it too (and shows it when a program Nod does not know did it).
+  const dangers = [...(summary.tokenDangers || []), ...((tokenInfo && tokenInfo.dangers) || [])];
+  for (const text of dangers) {
+    if (tokenAlerts.includes(text)) continue;
     warnings.push({ level: "danger", text });
     tokenAlerts.push(text);
   }

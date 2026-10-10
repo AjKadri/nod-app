@@ -106,4 +106,30 @@ function tokenBalance(rpc, { owner, mint, program = TOKEN_PROGRAM_ID }) {
   return data.readBigUInt64LE(64);
 }
 
-module.exports = { createMint, giveTokens, tokenBalance };
+/**
+ * The bytes of a token account the way the token program lays them out, with the fields that say who
+ * else has a say over it: a delegate (and how much it may spend) and a close authority.
+ */
+function tokenAccountBytes({ mint, owner, amount = 0n, delegate = null, delegatedAmount = 0n, closeAuthority = null, program = TOKEN_PROGRAM_ID, extension = false }) {
+  const data = Buffer.alloc(extension ? 170 : 165);
+  new PublicKey(mint).toBuffer().copy(data, 0);
+  new PublicKey(owner).toBuffer().copy(data, 32);
+  writeU64(data, 64, amount);
+  if (delegate) {
+    data.writeUInt32LE(1, 72);
+    new PublicKey(delegate).toBuffer().copy(data, 76);
+  }
+  data[108] = 1;
+  writeU64(data, 121, delegatedAmount);
+  if (closeAuthority) {
+    data.writeUInt32LE(1, 129);
+    new PublicKey(closeAuthority).toBuffer().copy(data, 133);
+  }
+  if (extension) {
+    data[165] = 2; // account type: token account
+    data.writeUInt16LE(7, 166); // an extension (ImmutableOwner)
+  }
+  return new Uint8Array(data);
+}
+
+module.exports = { createMint, giveTokens, tokenBalance, tokenAccountBytes };

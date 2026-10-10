@@ -348,7 +348,7 @@ async function previewTransaction(chain, transaction, walletAddress) {
     logs: [],
     /**
      * What happens to the wallet's token accounts, from the simulation (see tokens.js). Null when
-     * this chain cannot look up accounts. Otherwise { complete, changes, others, created, error }.
+     * this chain cannot look up accounts. Otherwise { complete, changes, others, created, dangers, error }.
      */
     tokens: null,
   };
@@ -386,7 +386,7 @@ async function previewTransaction(chain, transaction, walletAddress) {
               wallet: wallet.toBase58(),
               complete: watch.complete,
             })
-          : { complete: false, changes: [], others: [], created: [], error: "Could not read the token accounts" };
+          : { complete: false, changes: [], others: [], created: [], dangers: [], error: "Could not read the token accounts" };
     }
     result.ok = true;
     return result;

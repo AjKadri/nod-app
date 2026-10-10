@@ -209,6 +209,7 @@ function tokenTransfer(review, walletAddress, { allowCreate = false } = {}) {
   if (creates > 1) return null;
 
   if (view.complete !== true || view.error || !Array.isArray(view.changes) || !Array.isArray(view.others) || !Array.isArray(view.created)) return null;
+  if (Array.isArray(view.dangers) && view.dangers.length > 0) return null;
   if (!allowCreate && view.created.length !== 0) return null;
   if (view.changes.length !== 1 || view.others.length !== 1) return null;
   const sent = view.changes[0];
