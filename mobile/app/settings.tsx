@@ -16,9 +16,10 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
+import { TokenLogo } from '@/components/token-logo'
 import { DetailRow, Eyebrow, Label, NodButton } from '@/components/ui'
 import { radius, space, type ThemePreference } from '@/constants/theme'
-import { useApprovals } from '@/features/approvals/approvals-provider'
+import { useApprovals, type AutoTokenView } from '@/features/approvals/approvals-provider'
 import { formatSol } from '@/features/approvals/lib/approval'
 import { parseSolToLamports } from '@/features/approvals/lib/autoapprove'
 import { usePairings } from '@/features/pairing/pairing-provider'
@@ -323,7 +324,7 @@ function AutoApproveSettings() {
   }
 
   function toggle(on: boolean) {
-    if (on && auto.limitLamports <= 0) {
+    if (on && auto.limitLamports <= 0 && !auto.skr?.limit) {
       setProblem('Set a daily limit first, then turn this on.')
       return
     }
@@ -337,7 +338,8 @@ function AutoApproveSettings() {
         <View style={styles.switchText}>
           <Text style={{ color: tokens.text, fontSize: 16 }}>Auto-approve small payments</Text>
           <Label>
-            Skips the card for a plain SOL transfer to an address you approved yourself before, up to the limit.
+            Skips the card for a plain SOL or SKR transfer to an address you approved yourself before, up to that
+            token’s limit.
           </Label>
         </View>
         <Switch
@@ -385,6 +387,9 @@ function AutoApproveSettings() {
           <DetailRow label="Left today" value={formatSol(auto.remainingLamports)} last />
         </>
       ) : null}
+
+      {auto.skr ? <TokenLimit token={auto.skr} /> : null}
+
       <Label style={styles.help}>
         Every payment through Nod counts, approved by hand or not, with its network fee. The day ends at midnight, your
         local time. Anything else always asks: other kinds of transactions, a new address, any warning, a preview that
@@ -411,6 +416,66 @@ function AutoApproveSettings() {
           ))
         )}
       </View>
+    </View>
+  )
+}
+
+/** The daily limit of one token (SKR). Kept apart from the SOL limit: each is spent on its own. */
+function TokenLimit({ token }: { token: AutoTokenView }) {
+  const { tokens } = useTheme()
+  const saved = token.limit ?? ''
+  const [text, setText] = useState(saved)
+  const [problem, setProblem] = useState<string | null>(null)
+  useEffect(() => setText(saved), [saved])
+  const changed = text.trim() !== saved
+
+  function save() {
+    if (!token.setLimit(text)) {
+      setProblem(`Enter an amount in ${token.label}, like 100. Leave it empty for no limit.`)
+      return
+    }
+    setProblem(null)
+    Keyboard.dismiss()
+  }
+
+  return (
+    <View style={[styles.limitBlock, { borderTopColor: tokens.line }]}>
+      <View style={styles.limitRow}>
+        <TokenLogo logo={token.logo} size={22} />
+        <Label>Limit per day, in {token.label}</Label>
+      </View>
+      <View style={styles.limitRow}>
+        <TextInput
+          accessibilityLabel={`Daily limit in ${token.label}`}
+          value={text}
+          onChangeText={(value) => {
+            setText(value)
+            setProblem(null)
+          }}
+          keyboardType="decimal-pad"
+          placeholder="No limit set"
+          placeholderTextColor={tokens.muted}
+          returnKeyType="done"
+          onSubmitEditing={save}
+          style={[styles.limitInput, { color: tokens.text, borderColor: tokens.line, backgroundColor: tokens.raised }]}
+        />
+        <NodButton title="Save" variant="secondary" disabled={!changed} onPress={save} />
+      </View>
+      {problem ? (
+        <Text accessibilityRole="alert" style={{ color: tokens.danger, fontSize: 14 }}>
+          {problem}
+        </Text>
+      ) : null}
+      {token.limit ? (
+        <>
+          <DetailRow label={`${token.label} spent today`} value={`${token.spent} ${token.label}`} />
+          <DetailRow
+            label={`${token.label} left today`}
+            value={`${token.remaining ?? token.limit} ${token.label}`}
+            last
+          />
+        </>
+      ) : null}
     </View>
   )
 }

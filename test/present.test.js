@@ -147,6 +147,12 @@ test("demo mode sample data covers every state and uses the real presenter", () 
   // Three different agents are waiting, each with its own name and icon.
   assert.deepEqual([normal, risky, coder].map((r) => r.agent), ["Research agent", "Trading agent", "Claude Code"]);
   assert.equal(new Set([normal, risky, coder].map((r) => r.agentIcon)).size, 3);
+  // Two token cards: the official SKR, and a token that only calls itself SKR.
+  const [, , , skr, fake] = demoRequests();
+  assert.deepEqual([skr.presented.amount, skr.presented.unit, skr.presented.token.logo, skr.presented.risky], ["250", "SKR", "skr", false]);
+  assert.equal(fake.presented.token.known, false);
+  assert.equal(fake.presented.risky, true);
+  assert.deepEqual(fake.presented.tokenAlerts, ["This token claims to be SKR but isn’t the official SKR."]);
   assert.deepEqual(demoHistory().map((h) => h.status), ["approved", "rejected", "failed", "approved", "rejected"]);
   // Every icon in the sample data is one the phone will accept.
   const { cleanAgentIcon } = require("../shared/agent");

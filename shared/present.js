@@ -260,19 +260,25 @@ function presentReview(review) {
 
   const warnings = [];
   for (const found of mismatches) warnings.push({ level: "danger", text: found.message });
+  // Warnings about tokens also show on the card itself, not only in the details.
+  const tokenAlerts = [];
   for (const symbol of findImpostors(note, review)) {
-    warnings.push({ level: "danger", text: `This token claims to be ${symbol} but isn’t the official ${symbol}.` });
+    const text = `This token claims to be ${symbol} but isn’t the official ${symbol}.`;
+    warnings.push({ level: "danger", text });
+    tokenAlerts.push(text);
   }
   if (!preview.ok) {
     warnings.push({ level: "danger", text: "This transaction would fail or could not be checked." });
   }
   if (preview.ok && tokenInfo && tokenInfo.complete === false) {
-    warnings.push({
-      level: "danger",
-      text: "Nod could not check every account in this transaction, so some token changes may not be shown.",
-    });
+    const text = "Nod could not check every account in this transaction, so some token changes may not be shown.";
+    warnings.push({ level: "danger", text });
+    tokenAlerts.push(text);
   }
-  for (const text of summary.tokenDangers || []) warnings.push({ level: "danger", text });
+  for (const text of summary.tokenDangers || []) {
+    warnings.push({ level: "danger", text });
+    tokenAlerts.push(text);
+  }
   if (summary.unknownPrograms.length > 0) {
     const count = summary.unknownPrograms.length;
     warnings.push({
@@ -306,6 +312,8 @@ function presentReview(review) {
     mismatch,
     /** Lines under the amount: rent for a new token account. */
     notes,
+    /** Red warnings about tokens (a fake SKR, an unchecked account, a hand-over of control), for the card itself. */
+    tokenAlerts,
     /** Other amounts that move in the same transaction. */
     also,
     /** The wallet's token balances before and after, for the details. */

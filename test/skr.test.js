@@ -215,7 +215,7 @@ test("saved state: token limits and token spending survive a round trip, junk is
   const stored = {
     settings: { enabled: true, limitLamports: 0, tokenLimits: { [mint]: "100" } },
     known: [],
-    ledger: [{ id: "a", at: NOW, lamports: 5000, tokens: [{ mint, raw: "250" }] }],
+    ledger: [{ id: "a", at: NOW, lamports: 5000, tokens: [{ mint, raw: "250", decimals: 6 }] }],
   };
   assert.deepEqual(parseStored(JSON.stringify(stored)), stored);
   const messy = parseStored(
@@ -267,7 +267,7 @@ test("auto-approve: today's SKR payments (manual and automatic) use up the SKR l
   const s = setup();
   const first = await review(s, "60");
   const entry = ledgerEntryFor({ id: "r1", review: first, outcome: { status: "approved", signature: "SIG" }, now: NOW });
-  assert.deepEqual(entry, { id: "r1", at: NOW, lamports: 5000, tokens: [{ mint: s.mint, raw: "60000000" }] });
+  assert.deepEqual(entry, { id: "r1", at: NOW, lamports: 5000, tokens: [{ mint: s.mint, raw: "60000000", decimals: 6 }] });
   const second = decide(s, await review(s, "50"), { ledger: [entry] });
   assert.equal(second.auto, false);
   assert.equal(second.code, "over_limit");

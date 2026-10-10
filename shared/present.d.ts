@@ -16,6 +16,8 @@ export type Presented = {
   fee: string
   /** Lines under the amount, e.g. rent for a new token account. */
   notes: string[]
+  /** Red token warnings that show on the card itself. */
+  tokenAlerts: string[]
   /** Other amounts that move in the same transaction. */
   also: string[]
   /** The wallet's token balances before and after. */

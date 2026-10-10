@@ -8,9 +8,11 @@ import {
   remainingLamports,
   removeKnownAddress,
   spentToday,
+  spentTodayToken,
   type AutoSettings,
   type LedgerEntry,
   type StoredAuto,
+  type TokenAmountRaw,
 } from './lib/autoapprove'
 
 import type { NetworkId } from './lib/network'
@@ -18,7 +20,7 @@ import type { NetworkId } from './lib/network'
 // Devnet keeps the key it has always had. Mainnet is stored apart: its limit, its trusted addresses and
 // its record of spending are separate, so nothing learned on Devnet can approve real money.
 const keyFor = (network: NetworkId) => (network === 'devnet' ? 'nod.autoapprove.v1' : `nod.autoapprove.v1.${network}`)
-const EMPTY: StoredAuto = { settings: { enabled: false, limitLamports: 0 }, known: [], ledger: [] }
+const EMPTY: StoredAuto = { settings: { enabled: false, limitLamports: 0, tokenLimits: {} }, known: [], ledger: [] }
 
 /** Next local midnight, in ms. */
 function nextMidnight(now: number) {
@@ -38,7 +40,7 @@ export function useAutoStore(network: NetworkId) {
   const loadedRef = useRef(false)
   // False when saved data could not be read: then nothing is written, so a bad read cannot erase the ledger.
   const canSaveRef = useRef(true)
-  const reserved = useRef(new Map<string, number>())
+  const reserved = useRef(new Map<string, { lamports: number; tokens: TokenAmountRaw[] }>())
   const [state, setState] = useState<StoredAuto>(EMPTY)
   const [loaded, setLoaded] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -117,8 +119,14 @@ export function useAutoStore(network: NetworkId) {
 
   const reservedTotal = useCallback(() => {
     let total = 0
-    reserved.current.forEach((lamports) => (total += lamports))
+    reserved.current.forEach((held) => (total += held.lamports))
     return total
+  }, [])
+
+  const reservedTokens = useCallback(() => {
+    const all: TokenAmountRaw[] = []
+    reserved.current.forEach((held) => all.push(...held.tokens))
+    return all
   }, [])
 
   const api = useMemo(
@@ -130,9 +138,11 @@ export function useAutoStore(network: NetworkId) {
         known: ref.current.known,
         ledger: ref.current.ledger,
         reservedLamports: reservedTotal(),
+        reservedTokens: reservedTokens(),
       }),
       /** Hold back money for a payment that has started and is not finished. */
-      reserve: (id: string, lamports: number) => void reserved.current.set(id, lamports),
+      reserve: (id: string, lamports: number, tokens: TokenAmountRaw[] = []) =>
+        void reserved.current.set(id, { lamports, tokens }),
       release: (id: string) => void reserved.current.delete(id),
       record: (entry: LedgerEntry) =>
         change((previous) => ({
@@ -145,7 +155,7 @@ export function useAutoStore(network: NetworkId) {
         change((previous) => ({ ...previous, known: removeKnownAddress(previous.known, address) })),
       setSettings: (settings: AutoSettings) => change((previous) => ({ ...previous, settings })),
     }),
-    [change, reservedTotal],
+    [change, reservedTokens, reservedTotal],
   )
 
   const view = useMemo(
@@ -155,6 +165,15 @@ export function useAutoStore(network: NetworkId) {
       known: state.known,
       spentLamports: spentToday(state.ledger, now),
       remainingLamports: remainingLamports({ limitLamports: state.settings.limitLamports, ledger: state.ledger, now }),
+      /** Whole units of a token that left today, and the decimals last recorded for it (null until one has). */
+      tokenUsage: (mint: string) => {
+        let decimals: number | null = null
+        for (const entry of state.ledger) {
+          for (const item of entry.tokens ?? [])
+            if (item.mint === mint && typeof item.decimals === 'number') decimals = item.decimals
+        }
+        return { spentRaw: spentTodayToken(state.ledger, mint, now), decimals }
+      },
     }),
     [loaded, state, now],
   )

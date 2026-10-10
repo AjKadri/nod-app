@@ -368,7 +368,7 @@ function ledgerEntryFor({ id, review, outcome, now, maybeSent = false }) {
     return { id, at: now, lamports: fee };
   }
   const entry = { id, at: now, lamports: outflowLamports(review) };
-  const out = tokenOutflows(review).map(({ mint, raw }) => ({ mint, raw }));
+  const out = tokenOutflows(review).map(({ mint, raw, decimals }) => ({ mint, raw, decimals }));
   if (out.length > 0) entry.tokens = out;
   return entry;
 }
@@ -423,7 +423,7 @@ function parseStored(text) {
       const entry = { id: e.id.slice(0, 64), at: e.at, lamports: e.lamports };
       const items = (Array.isArray(e.tokens) ? e.tokens : [])
         .filter((t) => t && typeof t.mint === "string" && ADDRESS_RE.test(t.mint) && typeof t.raw === "string" && RAW_RE.test(t.raw))
-        .map((t) => ({ mint: t.mint, raw: t.raw }));
+        .map((t) => (Number.isInteger(t.decimals) && t.decimals >= 0 && t.decimals <= 30 ? { mint: t.mint, raw: t.raw, decimals: t.decimals } : { mint: t.mint, raw: t.raw }));
       if (items.length > 0) entry.tokens = items;
       return entry;
     })

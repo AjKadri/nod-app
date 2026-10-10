@@ -7,7 +7,7 @@ export type AutoSettings = {
   /** Daily limit per token, by mint: the amount as text in whole tokens, e.g. "100". */
   tokenLimits: Record<string, string>
 }
-export type TokenAmountRaw = { mint: string; raw: string }
+export type TokenAmountRaw = { mint: string; raw: string; decimals?: number }
 export type LedgerEntry = { id: string; at: number; lamports: number; tokens?: TokenAmountRaw[] }
 export type StoredAuto = { settings: AutoSettings; known: string[]; ledger: LedgerEntry[] }
 
