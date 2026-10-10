@@ -3,18 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import Animated, { SlideInDown } from 'react-native-reanimated'
 import { useTheme } from '@/components/theme-provider'
-import {
-  AgentMark,
-  DemoPill,
-  DetailRow,
-  Eyebrow,
-  Label,
-  NetworkPill,
-  NodButton,
-  Screen,
-  useNow,
-  Wordmark,
-} from '@/components/ui'
+import { AgentMark, DemoPill, DetailRow, Eyebrow, Label, NodButton, Screen, useNow, Wordmark } from '@/components/ui'
 import { radius, size, space } from '@/constants/theme'
 import { useNetwork } from '@/features/network/use-network'
 import { describeAgent } from './lib/agent'
@@ -38,7 +27,7 @@ export function ApprovalCard({
   onReject: () => void
 }) {
   const { tokens } = useTheme()
-  const { info } = useNetwork()
+  const { selectedNetwork } = useNetwork()
   const now = useNow()
   const { demo } = useApprovals()
   const [open, setOpen] = useState(false)
@@ -80,7 +69,7 @@ export function ApprovalCard({
             <Wordmark />
             <View style={styles.headerRight}>
               {demo ? <DemoPill /> : null}
-              <NetworkPill label={info.label} realMoney={info.realMoney} />
+              <Label>Solana · {selectedNetwork.label}</Label>
             </View>
           </View>
 

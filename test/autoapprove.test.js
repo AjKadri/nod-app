@@ -546,8 +546,6 @@ function fakeRelay() {
 
 function fakeChain({ confirm = { confirmed: true }, blockhashError } = {}) {
   return {
-    network: "devnet",
-    verifyNetwork: async () => true,
     getLatestBlockhash: async () => {
       if (blockhashError) throw blockhashError;
       return { blockhash: Keypair.generate().publicKey.toBase58(), slot: 1 };
@@ -556,7 +554,7 @@ function fakeChain({ confirm = { confirmed: true }, blockhashError } = {}) {
   };
 }
 
-const REQUEST = { id: "req1", payload: { type: "transfer", to: FRIEND, lamports: 10_000_000, note: "", agent: "bot", network: "devnet" } };
+const REQUEST = { id: "req1", payload: { type: "transfer", to: FRIEND, lamports: 10_000_000, note: "", agent: "bot" } };
 
 test("wallet step: approved automatically, reported like any approval, marked auto on the phone only", async () => {
   const relay = fakeRelay();
@@ -661,7 +659,7 @@ before(async () => {
   rpc = createLocalRpc({ port: 0 });
   const { url } = await rpc.listen();
   connection = new Connection(url, "confirmed");
-  chain = rpcChain(connection, "devnet");
+  chain = rpcChain(connection);
   wallet = Keypair.generate();
   walletAddress = wallet.publicKey.toBase58();
   rpc.airdrop(wallet.publicKey, 2 * SOL);
@@ -675,7 +673,7 @@ async function rawPayload(instructions, note = "") {
   const { blockhash } = await connection.getLatestBlockhash();
   const message = new TransactionMessage({ payerKey: wallet.publicKey, recentBlockhash: blockhash, instructions }).compileToLegacyMessage();
   const tx = new VersionedTransaction(message);
-  return { type: "raw", transactionBase64: Buffer.from(tx.serialize()).toString("base64"), note, agent: "bot", network: "devnet" };
+  return { type: "raw", transactionBase64: Buffer.from(tx.serialize()).toString("base64"), note, agent: "bot" };
 }
 
 async function realDecision(payload, overrides = {}) {
@@ -694,7 +692,7 @@ async function realDecision(payload, overrides = {}) {
 }
 
 test("real review: a plain transfer request to a known address is approved, fee included in what it counts", async () => {
-  const result = await realDecision({ type: "transfer", to: FRIEND, lamports: 20_000_000, note: "rent", agent: "bot", network: "devnet" });
+  const result = await realDecision({ type: "transfer", to: FRIEND, lamports: 20_000_000, note: "rent", agent: "bot" });
   assert.equal(result.auto, true);
   assert.equal(result.outflowLamports, 20_005_000);
 });
@@ -722,14 +720,14 @@ test("real review: two transfers in one transaction ask every time, even to know
 });
 
 test("real review: a note that understates the amount shows a warning, so it asks", async () => {
-  const result = await realDecision({ type: "transfer", to: FRIEND, lamports: 30_000_000, note: "tiny 0.001 SOL test payment", agent: "bot", network: "devnet" });
+  const result = await realDecision({ type: "transfer", to: FRIEND, lamports: 30_000_000, note: "tiny 0.001 SOL test payment", agent: "bot" });
   refused(result, "warnings");
 });
 
 test("real review: a transfer the wallet cannot afford fails the preview, so it asks", async () => {
   const poor = Keypair.generate();
   const real = await reviewRequest({
-    payload: { type: "transfer", to: FRIEND, lamports: 20_000_000, note: "", agent: "bot", network: "devnet" },
+    payload: { type: "transfer", to: FRIEND, lamports: 20_000_000, note: "", agent: "bot" },
     walletAddress: poor.publicKey.toBase58(),
     chain,
   });
@@ -749,11 +747,11 @@ test("real review: a transfer the wallet cannot afford fails the preview, so it 
 });
 
 test("real review: a stranger asks the first time", async () => {
-  refused(await realDecision({ type: "transfer", to: STRANGER, lamports: 20_000_000, note: "", agent: "bot", network: "devnet" }), "unknown_recipient");
+  refused(await realDecision({ type: "transfer", to: STRANGER, lamports: 20_000_000, note: "", agent: "bot" }), "unknown_recipient");
 });
 
 test("real review: plainSolTransfer reads the same facts the card shows", async () => {
-  const real = await reviewRequest({ payload: { type: "transfer", to: FRIEND, lamports: 5, note: "", agent: "bot", network: "devnet" }, walletAddress, chain });
+  const real = await reviewRequest({ payload: { type: "transfer", to: FRIEND, lamports: 5, note: "", agent: "bot" }, walletAddress, chain });
   assert.deepEqual(plainSolTransfer(real, walletAddress), { to: FRIEND, lamports: 5 });
   assert.equal(plainSolTransfer(real, STRANGER), null);
 });

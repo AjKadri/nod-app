@@ -14,7 +14,6 @@ const {
   TransactionMessage,
   VersionedTransaction,
 } = require("@solana/web3.js");
-const { NETWORKS, parseNetwork, networkMismatchMessage } = require("./network");
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const MAX_NOTE_LENGTH = 280;
@@ -65,9 +64,6 @@ function validateRequest(payload) {
     throw new ApprovalError("bad_request", `note must be text of at most ${MAX_NOTE_LENGTH} characters`);
   }
   const agent = typeof payload.agent === "string" ? payload.agent.slice(0, 60) : "";
-  // Which network the agent means. Left out when missing or unknown: reviewRequest refuses those.
-  const network = parseNetwork(payload.network);
-  const withNetwork = (clean) => (network ? { ...clean, network } : clean);
 
   if (payload.type === "transfer") {
     const to = toPublicKey(payload.to, "to").toBase58();
@@ -75,7 +71,7 @@ function validateRequest(payload) {
     if (!Number.isSafeInteger(lamports) || lamports <= 0) {
       throw new ApprovalError("bad_request", "lamports must be a positive whole number");
     }
-    return withNetwork({ type: "transfer", to, lamports, note, agent });
+    return { type: "transfer", to, lamports, note, agent };
   }
 
   if (payload.type === "raw") {
@@ -86,26 +82,10 @@ function validateRequest(payload) {
     if (b64.length > MAX_TX_BASE64_LENGTH || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
       throw new ApprovalError("bad_request", "transactionBase64 is not a valid base64 Solana transaction");
     }
-    return withNetwork({ type: "raw", transactionBase64: b64, note, agent });
+    return { type: "raw", transactionBase64: b64, note, agent };
   }
 
   throw new ApprovalError("bad_request", `Unknown request type: ${String(payload.type)}`);
-}
-
-/**
- * Refuse a request that is not for the network this phone is on, and a phone whose RPC server is
- * not that network. Called before anything is shown or signed. Fails closed: a request that does
- * not name a network is refused, and so is a chain that cannot prove which network it is.
- */
-async function assertNetwork(request, chain) {
-  const phone = chain && chain.network;
-  if (!NETWORKS[phone] || typeof chain.verifyNetwork !== "function") {
-    throw new ApprovalError("no_network", "This phone could not tell which network it is on, so Nod refused the request. Nothing was signed.");
-  }
-  if (request.network !== phone) {
-    throw new ApprovalError("wrong_network", networkMismatchMessage(request.network, phone));
-  }
-  await chain.verifyNetwork();
 }
 
 function emptySignatures(count) {
@@ -312,14 +292,12 @@ function describePreview(preview) {
  */
 async function reviewRequest({ payload, walletAddress, chain }) {
   const request = validateRequest(payload);
-  await assertNetwork(request, chain);
   const latest = await chain.getLatestBlockhash();
   const prepared = prepareTransaction(request, walletAddress, latest.blockhash);
   const summary = summarizeTransaction(prepared.transaction);
   const preview = await previewTransaction(chain, prepared.transaction, walletAddress);
   return {
     request,
-    network: chain.network,
     summary,
     preview,
     headline: describePreview(preview),
@@ -336,7 +314,6 @@ async function reviewRequest({ payload, walletAddress, chain }) {
  * @returns {{ signature: string, refreshed: boolean }}
  */
 async function approveRequest({ payload, walletAddress, chain, signAndSend }) {
-  await assertNetwork(validateRequest(payload), chain);
   const latest = await chain.getLatestBlockhash();
   const prepared = prepareTransaction(payload, walletAddress, latest.blockhash);
   const signature = await signAndSend(prepared.transaction, latest.slot);
@@ -351,7 +328,6 @@ module.exports = {
   KNOWN_PROGRAMS,
   LAMPORTS_PER_SOL,
   validateRequest,
-  assertNetwork,
   prepareTransaction,
   summarizeTransaction,
   previewTransaction,

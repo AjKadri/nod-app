@@ -48,11 +48,7 @@ function errorMessage(mapped) {
   return `Error processing Instruction ${mapped.InstructionError[0]}: ${JSON.stringify(mapped.InstructionError[1])}`;
 }
 
-// By default this stand-in says it is devnet, so a phone set to Devnet accepts it. Tests that need
-// "the wrong network" pass another hash.
-const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
-
-function createLocalRpc({ port = 8899, host = "127.0.0.1", genesisHash = DEVNET_GENESIS_HASH } = {}) {
+function createLocalRpc({ port = 8899, host = "127.0.0.1" } = {}) {
   const svm = new LiteSVM().withTransactionHistory(10_000n);
   let slot = 1;
 
@@ -78,7 +74,6 @@ function createLocalRpc({ port = 8899, host = "127.0.0.1", genesisHash = DEVNET_
   const methods = {
     getVersion: () => ({ "solana-core": "local-litesvm", "feature-set": 0 }),
     getHealth: () => "ok",
-    getGenesisHash: () => genesisHash,
     getSlot: () => slot,
     getBlockHeight: () => slot,
 

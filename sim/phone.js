@@ -34,9 +34,9 @@ const { submitApproval, submitDenial, submitInvalid } = require("../shared/flow"
  * @param decide async (review, request) => "approve" | "deny"
  * @param onEvent optional (event) => void, for logging and tests
  */
-function createSimPhone({ relayUrl, rpcUrl, keypair, decide, token = "", network = "devnet", onEvent = () => {} }) {
+function createSimPhone({ relayUrl, rpcUrl, keypair, decide, token = "", onEvent = () => {} }) {
   const connection = new Connection(rpcUrl, "confirmed");
-  const chain = rpcChain(connection, network);
+  const chain = rpcChain(connection);
   const walletAddress = keypair.publicKey;
   let queue = Promise.resolve();
   // Requests the relay says are finished (answered, expired, or withdrawn by the agent).

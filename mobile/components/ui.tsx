@@ -86,16 +86,8 @@ export function Eyebrow({ children }: PropsWithChildren) {
   )
 }
 
-/** The network a request or the app is on. Mainnet is real money, so it shows in the warning colour. */
-export function NetworkPill({ label, realMoney = false }: { label: string; realMoney?: boolean }) {
+export function NetworkPill({ label }: { label: string }) {
   const { tokens } = useTheme()
-  if (realMoney) {
-    return (
-      <View accessibilityLabel={`${label}. Real money.`} style={[styles.pill, { borderColor: tokens.warn }]}>
-        <Text style={{ color: tokens.warn, fontSize: size.small, fontWeight: '700' }}>{label}</Text>
-      </View>
-    )
-  }
   return (
     <View style={[styles.pill, { borderColor: tokens.line }]}>
       <Text style={{ color: tokens.muted, fontSize: size.small }}>Solana · {label}</Text>

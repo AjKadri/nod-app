@@ -13,11 +13,7 @@ import {
   type StoredAuto,
 } from './lib/autoapprove'
 
-import type { NetworkId } from './lib/network'
-
-// Devnet keeps the key it has always had. Mainnet is stored apart: its limit, its trusted addresses and
-// its record of spending are separate, so nothing learned on Devnet can approve real money.
-const keyFor = (network: NetworkId) => (network === 'devnet' ? 'nod.autoapprove.v1' : `nod.autoapprove.v1.${network}`)
+const KEY = 'nod.autoapprove.v1'
 const EMPTY: StoredAuto = { settings: { enabled: false, limitLamports: 0 }, known: [], ledger: [] }
 
 /** Next local midnight, in ms. */
@@ -32,8 +28,7 @@ function nextMidnight(now: number) {
  * wallet recently. Lives only on this phone. Reads and writes go through a ref, so two requests
  * arriving together see each other's reservations at once (no waiting for a re-render).
  */
-export function useAutoStore(network: NetworkId) {
-  const KEY = keyFor(network)
+export function useAutoStore() {
   const ref = useRef<StoredAuto>(EMPTY)
   const loadedRef = useRef(false)
   // False when saved data could not be read: then nothing is written, so a bad read cannot erase the ledger.
@@ -46,7 +41,7 @@ export function useAutoStore(network: NetworkId) {
   const save = useCallback(() => {
     if (!loadedRef.current || !canSaveRef.current) return
     AsyncStorage.setItem(KEY, JSON.stringify(ref.current)).catch(() => {})
-  }, [KEY])
+  }, [])
 
   const change = useCallback(
     (update: (previous: StoredAuto) => StoredAuto) => {
@@ -79,7 +74,7 @@ export function useAutoStore(network: NetworkId) {
         setLoaded(true)
         save()
       })
-  }, [KEY, save])
+  }, [save])
 
   // The day rolls over at local midnight, and the clock may have moved while Nod was closed.
   useEffect(() => {

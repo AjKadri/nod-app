@@ -66,8 +66,6 @@ const MAX_PENDING_TOTAL = 500;
 const MAX_RESOLVED_KEPT = 100;
 const KEEP_RESOLVED_MS = 60 * 60 * 1000;
 const MIN_HOSTED_REGISTRATION_KEY = 24;
-// What an agent may ask for. The phone checks each one again before showing it.
-const REQUEST_TYPES = ["transfer", "token_transfer", "raw"];
 const PUSH_TIMEOUT_MS = 8000;
 const MAX_AGENT_NAME = 60;
 const MAX_AGENT_ICON = 32;
@@ -653,8 +651,8 @@ function createRelay({
     if (req.method === "POST" && route === "/requests") {
       if (!only("agent")) return;
       const payload = await readJson(req);
-      if (!payload || !REQUEST_TYPES.includes(payload.type)) {
-        return send(res, 400, { error: 'type must be "transfer", "token_transfer" or "raw"' });
+      if (!payload || (payload.type !== "transfer" && payload.type !== "raw")) {
+        return send(res, 400, { error: 'type must be "transfer" or "raw"' });
       }
       if (pairing.paused) return send(res, 423, { error: PAUSED_MESSAGE, code: "paused", paused: true });
       // Who is asking is shown to the user; keep it short. The phone checks it again before showing it.
