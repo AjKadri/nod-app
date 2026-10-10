@@ -69,7 +69,7 @@ export function ApprovalCard({
             <Wordmark />
             <View style={styles.headerRight}>
               {demo ? <DemoPill /> : null}
-              <Label>Solana · {selectedNetwork.label}</Label>
+              <Label>{selectedNetwork.label}</Label>
             </View>
           </View>
 

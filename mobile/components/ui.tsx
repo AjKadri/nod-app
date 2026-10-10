@@ -90,7 +90,7 @@ export function NetworkPill({ label }: { label: string }) {
   const { tokens } = useTheme()
   return (
     <View style={[styles.pill, { borderColor: tokens.line }]}>
-      <Text style={{ color: tokens.muted, fontSize: size.small }}>Solana · {label}</Text>
+      <Text style={{ color: tokens.muted, fontSize: size.small }}>{label}</Text>
     </View>
   )
 }

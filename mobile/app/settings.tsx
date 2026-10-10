@@ -25,7 +25,6 @@ import { formatSol } from '@/features/approvals/lib/approval'
 import { parseSolToLamports } from '@/features/approvals/lib/autoapprove'
 import { usePairings } from '@/features/pairing/pairing-provider'
 import { usePush } from '@/features/push/push-provider'
-import { useNetwork } from '@/features/network/use-network'
 import { shorten } from '@/utils/format'
 
 const THEMES: { value: ThemePreference; label: string }[] = [
@@ -54,7 +53,6 @@ export default function SettingsScreen() {
   const { tokens, preference, setPreference } = useTheme()
   const router = useRouter()
   const { account, disconnect } = useMobileWallet()
-  const { networks, selectedNetwork, setSelectedNetwork } = useNetwork()
   const { pairingStatuses, demo, setDemo } = useApprovals()
   const { pairings, revoke } = usePairings()
   const { status: pushStatus, enable: enablePush } = usePush()
@@ -183,18 +181,6 @@ export default function SettingsScreen() {
           <Segmented options={THEMES} value={preference} onChange={setPreference} label="Theme" />
         </Section>
 
-        <Section title="Network">
-          <Segmented
-            options={networks.map((network) => ({ value: network.id, label: network.label }))}
-            value={selectedNetwork.id}
-            onChange={(id) => {
-              const next = networks.find((network) => network.id === id)
-              if (next) setSelectedNetwork(next)
-            }}
-            label="Network"
-          />
-        </Section>
-
         <Section title="About">
           <About />
         </Section>
@@ -210,7 +196,11 @@ function About() {
   const links = [AppConfig.links.website, AppConfig.links.github, AppConfig.links.x]
   return (
     <View>
-      <DetailRow label="Nod" value={version ? `${version}${build ? ` (build ${build})` : ''}` : 'Unknown version'} last />
+      <DetailRow
+        label="Nod"
+        value={version ? `${version}${build ? ` (build ${build})` : ''}` : 'Unknown version'}
+        last
+      />
       <View style={styles.aboutLinks}>
         {links.map((link) => (
           <NodButton

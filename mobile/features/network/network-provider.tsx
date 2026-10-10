@@ -29,8 +29,6 @@ function getExplorerUrlParam(network: SolanaCluster): string {
   switch (network.id) {
     case 'solana:devnet':
       return `?cluster=devnet`
-    case 'solana:testnet':
-      return `?cluster=testnet`
     case 'solana:localnet':
       return `?cluster=custom&customUrl=${encodeURIComponent(network.url)}`
     default:

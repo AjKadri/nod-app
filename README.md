@@ -123,6 +123,10 @@ The approval logic lives once, in `shared/`, and is mirrored into the app.
 - **Preview checked against devnet only.** Blockhash refresh only works when the wallet is the sole signer. The template's `react-native-quick-crypto` 0.7.17 has an open npm advisory and should be upgraded before real use.
 - **Not tried on every phone and wallet.** The loop has been run end to end on a real phone with Solflare. Other wallets and Android versions are untested.
 
+## What's next
+
+Planned, not built into this release: a Mainnet option and token payments (SPL and Token-2022 tokens, with SKR first). Nod is Devnet only today.
+
 ## Repo layout
 
 ```

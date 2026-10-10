@@ -20,13 +20,8 @@ export class AppConfig {
   static networks: SolanaCluster[] = [
     {
       id: 'solana:devnet',
-      label: 'Devnet',
+      label: 'Solana devnet',
       url: clusterApiUrl('devnet'),
-    },
-    {
-      id: 'solana:testnet',
-      label: 'Testnet',
-      url: clusterApiUrl('testnet'),
     },
   ]
   /** Where Settings → About sends people. */
