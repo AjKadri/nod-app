@@ -1,6 +1,7 @@
 import type { Connection, PublicKey, VersionedMessage, VersionedTransaction } from '@solana/web3.js'
 
 import type { NetworkId } from './network'
+import type { RawAccount } from './tokens'
 
 export type Chain = {
   /** The network this chain is meant to be. */
@@ -12,7 +13,10 @@ export type Chain = {
   simulate(
     transaction: VersionedTransaction,
     publicKey: PublicKey,
-  ): Promise<{ err: unknown; postLamports: number | null; logs: string[] }>
+    watch?: PublicKey[],
+  ): Promise<{ err: unknown; postLamports: number | null; logs: string[]; accounts: RawAccount[] }>
+  /** The accounts at these addresses right now (null where there is none). */
+  getAccounts(addresses: PublicKey[]): Promise<RawAccount[]>
   getFee(message: VersionedMessage): Promise<number | null>
   sendRaw(serializedTransaction: Uint8Array): Promise<string>
   confirm(

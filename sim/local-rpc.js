@@ -15,6 +15,7 @@ const bs58pkg = require("bs58");
 const bs58 = bs58pkg.default || bs58pkg;
 const { LiteSVM, FailedTransactionMetadata } = require("litesvm");
 const { PublicKey, VersionedMessage, VersionedTransaction } = require("@solana/web3.js");
+const { withoutAtaInstructions } = require("./ata-shim");
 
 const LAMPORTS_PER_SIGNATURE = 5000;
 const TRANSACTION_ERRORS = {
@@ -87,6 +88,13 @@ function createLocalRpc({ port = 8899, host = "127.0.0.1", genesisHash = DEVNET_
       value: { blockhash: svm.latestBlockhash(), lastValidBlockHeight: slot + 150 },
     }),
 
+    getAccountInfo: ([address]) => ({ context: context(), value: accountJson(svm.getAccount(new PublicKey(address))) }),
+
+    getMultipleAccounts: ([addresses]) => ({
+      context: context(),
+      value: addresses.map((address) => accountJson(svm.getAccount(new PublicKey(address)))),
+    }),
+
     getBalance: ([address]) => ({
       context: context(),
       value: Number(svm.getBalance(new PublicKey(address)) || 0n),
@@ -110,38 +118,46 @@ function createLocalRpc({ port = 8899, host = "127.0.0.1", genesisHash = DEVNET_
       const transaction = decodeTransaction(encoded, options);
       if (options.replaceRecentBlockhash) transaction.message.recentBlockhash = svm.latestBlockhash();
       const verify = options.sigVerify === true;
-      if (!verify) svm.withSigverify(false);
-      let result;
+      // Creating an associated token account is done by the shim (see ./ata-shim.js), which leaves
+      // the signatures not matching what LiteSVM runs, so signature checks are off in that case.
+      const prepared = withoutAtaInstructions(svm, transaction);
       try {
-        result = svm.simulateTransaction(transaction);
-      } finally {
-        if (!verify) svm.withSigverify(true);
-      }
-      const addresses = (options.accounts && options.accounts.addresses) || null;
-      if (result instanceof FailedTransactionMetadata) {
+        const checkSignatures = verify && !prepared.shimmed;
+        if (!checkSignatures) svm.withSigverify(false);
+        let result;
+        try {
+          result = svm.simulateTransaction(prepared.transaction);
+        } finally {
+          if (!checkSignatures) svm.withSigverify(true);
+        }
+        const addresses = (options.accounts && options.accounts.addresses) || null;
+        if (result instanceof FailedTransactionMetadata) {
+          return {
+            context: context(),
+            value: { err: mapError(result.err()), logs: result.meta().logs(), accounts: null, unitsConsumed: 0, returnData: null },
+          };
+        }
+        const post = result.postAccounts();
+        const accounts = addresses
+          ? addresses.map((address) => {
+              const key = new PublicKey(address);
+              const found = post.find(([postKey]) => postKey.equals(key));
+              return accountJson(found ? found[1] : svm.getAccount(key));
+            })
+          : null;
         return {
           context: context(),
-          value: { err: mapError(result.err()), logs: result.meta().logs(), accounts: null, unitsConsumed: 0, returnData: null },
+          value: {
+            err: null,
+            logs: result.meta().logs(),
+            accounts,
+            unitsConsumed: Number(result.meta().computeUnitsConsumed()),
+            returnData: null,
+          },
         };
+      } finally {
+        prepared.undo();
       }
-      const post = result.postAccounts();
-      const accounts = addresses
-        ? addresses.map((address) => {
-            const key = new PublicKey(address);
-            const found = post.find(([postKey]) => postKey.equals(key));
-            return accountJson(found ? found[1] : svm.getAccount(key));
-          })
-        : null;
-      return {
-        context: context(),
-        value: {
-          err: null,
-          logs: result.meta().logs(),
-          accounts,
-          unitsConsumed: Number(result.meta().computeUnitsConsumed()),
-          returnData: null,
-        },
-      };
     },
 
     sendTransaction: ([encoded, options = {}]) => {
@@ -156,11 +172,37 @@ function createLocalRpc({ port = 8899, host = "127.0.0.1", genesisHash = DEVNET_
       // Like a real node: simulate first ("preflight") so a transaction that
       // would fail is rejected without landing and without charging a fee.
       if (!options.skipPreflight) {
-        const preflight = svm.simulateTransaction(transaction);
-        if (preflight instanceof FailedTransactionMetadata) reject(preflight);
+        const check = withoutAtaInstructions(svm, transaction);
+        try {
+          if (check.shimmed) svm.withSigverify(false);
+          let preflight;
+          try {
+            preflight = svm.simulateTransaction(check.transaction);
+          } finally {
+            if (check.shimmed) svm.withSigverify(true);
+          }
+          if (preflight instanceof FailedTransactionMetadata) reject(preflight);
+        } finally {
+          check.undo();
+        }
       }
-      const result = svm.sendTransaction(transaction);
-      if (result instanceof FailedTransactionMetadata) reject(result);
+      const prepared = withoutAtaInstructions(svm, transaction);
+      let result;
+      try {
+        if (prepared.shimmed) svm.withSigverify(false);
+        try {
+          result = svm.sendTransaction(prepared.transaction);
+        } finally {
+          if (prepared.shimmed) svm.withSigverify(true);
+        }
+      } catch (err) {
+        prepared.undo();
+        throw err;
+      }
+      if (result instanceof FailedTransactionMetadata) {
+        prepared.undo();
+        reject(result);
+      }
       slot += 1;
       return bs58.encode(transaction.signatures[0]);
     },

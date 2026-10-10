@@ -15,6 +15,7 @@ const {
   VersionedTransaction,
 } = require("@solana/web3.js");
 const { NETWORKS, parseNetwork, networkMismatchMessage } = require("./network");
+const tokens = require("./tokens");
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const MAX_NOTE_LENGTH = 280;
@@ -78,6 +79,18 @@ function validateRequest(payload) {
     return withNetwork({ type: "transfer", to, lamports, note, agent });
   }
 
+  if (payload.type === "token_transfer") {
+    const mint = toPublicKey(payload.mint, "mint").toBase58();
+    const to = toPublicKey(payload.to, "to").toBase58();
+    // The amount is a decimal string in whole tokens ("250", "0.5"). It is turned into the token's
+    // smallest units on the phone, using the decimals read from the mint on chain.
+    const amount = typeof payload.amount === "number" && Number.isFinite(payload.amount) ? String(payload.amount) : payload.amount;
+    if (typeof amount !== "string" || !/^\d{1,24}(\.\d{1,30})?$/.test(amount.trim()) || !/[1-9]/.test(amount)) {
+      throw new ApprovalError("bad_request", "amount must be a positive number of tokens, like 250 or 0.5");
+    }
+    return withNetwork({ type: "token_transfer", mint, to, amount: amount.trim(), note, agent });
+  }
+
   if (payload.type === "raw") {
     const b64 = payload.transactionBase64;
     if (typeof b64 !== "string" || b64.length === 0) {
@@ -108,6 +121,45 @@ async function assertNetwork(request, chain) {
   await chain.verifyNetwork();
 }
 
+/**
+ * Look up what building the request needs from the chain. Only a token transfer needs anything: the
+ * mint's decimals and token program (read from the mint account, never assumed) and whether the
+ * recipient already has a token account for it.
+ */
+async function resolveRequestContext(request, walletAddress, chain) {
+  if (request.type !== "token_transfer") return {};
+  const wallet = toPublicKey(walletAddress, "wallet");
+  const to = new PublicKey(request.to);
+  if (to.equals(wallet)) throw new ApprovalError("bad_request", "Transfer destination is the wallet itself");
+  const mint = new PublicKey(request.mint);
+  const [mintAccount] = await chain.getAccounts([mint]);
+  if (!mintAccount) {
+    throw new ApprovalError("bad_token", `That token does not exist on ${NETWORKS[chain.network].label}. Nothing was signed.`);
+  }
+  const parsed = tokens.parseMint(mintAccount.data, mintAccount.owner);
+  if (!parsed) {
+    throw new ApprovalError("bad_token", "That address is not a token mint (SPL Token or Token-2022). Nothing was signed.");
+  }
+  const amountRaw = tokens.parseTokenAmount(request.amount, parsed.decimals);
+  if (amountRaw === null || amountRaw > 0xffffffffffffffffn) {
+    throw new ApprovalError("bad_request", `That amount does not fit this token, which has ${parsed.decimals} decimal places`);
+  }
+  const tokenProgram = mintAccount.owner;
+  const senderAta = tokens.associatedTokenAddress(wallet, mint, tokenProgram);
+  const recipientAta = tokens.associatedTokenAddress(to, mint, tokenProgram);
+  const [recipientAccount] = await chain.getAccounts([recipientAta]);
+  return {
+    token: {
+      tokenProgram,
+      decimals: parsed.decimals,
+      amountRaw,
+      senderAta,
+      recipientAta,
+      createRecipientAta: !recipientAccount,
+    },
+  };
+}
+
 function emptySignatures(count) {
   return Array.from({ length: count }, () => new Uint8Array(64));
 }
@@ -126,9 +178,10 @@ function emptySignatures(count) {
  * @param payload a request payload (validated again here)
  * @param walletAddress the phone wallet's address (PublicKey or base58)
  * @param {string} blockhash a recent blockhash fetched just now
+ * @param context what resolveRequestContext() found out (needed for "token_transfer" only)
  * @returns {{ transaction: VersionedTransaction, refreshed: boolean, signerCount: number }}
  */
-function prepareTransaction(payload, walletAddress, blockhash) {
+function prepareTransaction(payload, walletAddress, blockhash, context) {
   const request = validateRequest(payload);
   const wallet = toPublicKey(walletAddress, "wallet");
   if (typeof blockhash !== "string" || blockhash.length === 0) {
@@ -147,6 +200,30 @@ function prepareTransaction(payload, walletAddress, blockhash) {
         SystemProgram.transfer({ fromPubkey: wallet, toPubkey: to, lamports: request.lamports }),
       ],
     }).compileToLegacyMessage();
+    return { transaction: new VersionedTransaction(message), refreshed: true, signerCount: 1 };
+  }
+
+  if (request.type === "token_transfer") {
+    const t = context && context.token;
+    if (!t) throw new ApprovalError("bad_request", "The token details were not looked up");
+    const instructions = [];
+    if (t.createRecipientAta) {
+      instructions.push(
+        tokens.createAtaIdempotentInstruction({ payer: wallet, ata: t.recipientAta, owner: request.to, mint: request.mint, tokenProgram: t.tokenProgram }),
+      );
+    }
+    instructions.push(
+      tokens.transferCheckedInstruction({
+        source: t.senderAta,
+        mint: request.mint,
+        destination: t.recipientAta,
+        authority: wallet,
+        amount: t.amountRaw,
+        decimals: t.decimals,
+        tokenProgram: t.tokenProgram,
+      }),
+    );
+    const message = new TransactionMessage({ payerKey: wallet, recentBlockhash: blockhash, instructions }).compileToLegacyMessage();
     return { transaction: new VersionedTransaction(message), refreshed: true, signerCount: 1 };
   }
 
@@ -209,6 +286,8 @@ function summarizeTransaction(transaction) {
   const keys = message.staticAccountKeys;
   const programs = [];
   const transfers = [];
+  const tokenInstructions = [];
+  const tokenDangers = [];
   const systemProgram = SystemProgram.programId.toBase58();
 
   for (const ix of message.compiledInstructions) {
@@ -218,6 +297,11 @@ function summarizeTransaction(transaction) {
       programs.push({ id: programId, name: KNOWN_PROGRAMS[programId] || null });
     }
     const data = ix.data;
+    const tokenKind = tokens.classifyTokenInstruction(programId, data);
+    if (tokenKind) {
+      tokenInstructions.push(tokenKind.kind);
+      if (tokenKind.danger && !tokenDangers.includes(tokenKind.danger)) tokenDangers.push(tokenKind.danger);
+    }
     const isSystemTransfer =
       programId === systemProgram && data.length === 12 && readU32LE(data, 0) === 2;
     if (isSystemTransfer) {
@@ -234,6 +318,10 @@ function summarizeTransaction(transaction) {
   return {
     programs,
     transfers,
+    /** The kind of each instruction that belongs to a token program: transfer, createAta, dangerous, other. */
+    tokenInstructions,
+    /** Plain-words descriptions of token instructions that hand over control (approve, set authority). */
+    tokenDangers,
     instructionCount: message.compiledInstructions.length,
     signerCount: message.header.numRequiredSignatures,
     usesLookupTables: (message.addressTableLookups || []).length > 0,
@@ -258,12 +346,21 @@ async function previewTransaction(chain, transaction, walletAddress) {
     feeLamports: null,
     error: null,
     logs: [],
+    /**
+     * What happens to the wallet's token accounts, from the simulation (see tokens.js). Null when
+     * this chain cannot look up accounts. Otherwise { complete, changes, others, created, error }.
+     */
+    tokens: null,
   };
   try {
-    const [pre, sim, fee] = await Promise.all([
+    // Token accounts can sit anywhere in the transaction, so look at every account it touches:
+    // their state now, and their state after the simulation.
+    const watch = typeof chain.getAccounts === "function" ? await tokens.transactionAccountKeys(chain, transaction) : null;
+    const [pre, sim, fee, accountsBefore] = await Promise.all([
       chain.getBalance(wallet),
-      chain.simulate(transaction, wallet),
+      chain.simulate(transaction, wallet, watch ? watch.keys : []),
       chain.getFee(transaction.message).catch(() => null),
+      watch ? chain.getAccounts(watch.keys).catch(() => null) : null,
     ]);
     result.preLamports = pre;
     result.feeLamports = fee;
@@ -278,6 +375,19 @@ async function previewTransaction(chain, transaction, walletAddress) {
     }
     result.postLamports = sim.postLamports;
     result.deltaLamports = sim.postLamports - pre;
+    if (watch) {
+      result.tokens =
+        accountsBefore && Array.isArray(sim.accounts)
+          ? await tokens.describeTokenChanges({
+              chain,
+              keys: watch.keys,
+              pre: accountsBefore,
+              post: sim.accounts,
+              wallet: wallet.toBase58(),
+              complete: watch.complete,
+            })
+          : { complete: false, changes: [], others: [], created: [], error: "Could not read the token accounts" };
+    }
     result.ok = true;
     return result;
   } catch (err) {
@@ -295,34 +405,50 @@ function formatSol(lamports) {
   return `${sign}${whole}${frac ? "." + frac : ""} SOL`;
 }
 
-/** One sentence for the approval screen, e.g. "You send 0.001005 SOL (network fee included)". */
-function describePreview(preview) {
+/**
+ * One sentence for the approval screen, e.g. "You send 0.001005 SOL (network fee included)" or
+ * "You send 250 SKR and 0.000005 SOL (network fee included)".
+ */
+function describePreview(preview, registry) {
   if (!preview || !preview.ok) {
     return `Could not simulate: ${preview && preview.error ? preview.error : "unknown error"}`;
   }
+  const parts = { send: [], receive: [] };
+  for (const change of (preview.tokens && preview.tokens.changes) || []) {
+    const raw = BigInt(change.deltaRaw);
+    const text = `${tokens.formatTokenAmount(raw < 0n ? -raw : raw, change.decimals)} ${tokens.tokenLabel(registry, change.mint)}`;
+    (raw < 0n ? parts.send : parts.receive).push(text);
+  }
   const delta = preview.deltaLamports;
-  if (delta < 0) return `You send ${formatSol(-delta)} (network fee included)`;
-  if (delta > 0) return `You receive ${formatSol(delta)}`;
-  return "No change to your SOL balance";
+  if (delta < 0) parts.send.push(formatSol(-delta));
+  if (delta > 0) parts.receive.push(formatSol(delta));
+  const sentences = [];
+  if (parts.send.length) sentences.push(`You send ${parts.send.join(" and ")}${delta < 0 ? " (network fee included)" : ""}`);
+  if (parts.receive.length) sentences.push(`${sentences.length ? "you receive" : "You receive"} ${parts.receive.join(" and ")}`);
+  return sentences.length ? sentences.join(", ") : "No change to your SOL balance";
 }
 
 /**
  * Step 1, when a request arrives: build the transaction and work out what it
  * does, for display. Nothing is signed.
  */
-async function reviewRequest({ payload, walletAddress, chain }) {
+async function reviewRequest({ payload, walletAddress, chain, registry }) {
   const request = validateRequest(payload);
   await assertNetwork(request, chain);
+  const known = registry || tokens.tokenRegistry(chain.network);
+  const context = await resolveRequestContext(request, walletAddress, chain);
   const latest = await chain.getLatestBlockhash();
-  const prepared = prepareTransaction(request, walletAddress, latest.blockhash);
+  const prepared = prepareTransaction(request, walletAddress, latest.blockhash, context);
   const summary = summarizeTransaction(prepared.transaction);
   const preview = await previewTransaction(chain, prepared.transaction, walletAddress);
   return {
     request,
     network: chain.network,
+    /** The tokens Nod calls by name on this network (see tokens.js). */
+    registry: known,
     summary,
     preview,
-    headline: describePreview(preview),
+    headline: describePreview(preview, known),
     refreshable: prepared.refreshed,
     signerCount: prepared.signerCount,
   };
@@ -336,9 +462,11 @@ async function reviewRequest({ payload, walletAddress, chain }) {
  * @returns {{ signature: string, refreshed: boolean }}
  */
 async function approveRequest({ payload, walletAddress, chain, signAndSend }) {
-  await assertNetwork(validateRequest(payload), chain);
+  const request = validateRequest(payload);
+  await assertNetwork(request, chain);
+  const context = await resolveRequestContext(request, walletAddress, chain);
   const latest = await chain.getLatestBlockhash();
-  const prepared = prepareTransaction(payload, walletAddress, latest.blockhash);
+  const prepared = prepareTransaction(request, walletAddress, latest.blockhash, context);
   const signature = await signAndSend(prepared.transaction, latest.slot);
   if (typeof signature !== "string" || signature.length === 0) {
     throw new ApprovalError("no_signature", "The wallet did not return a transaction signature");
@@ -352,6 +480,7 @@ module.exports = {
   LAMPORTS_PER_SOL,
   validateRequest,
   assertNetwork,
+  resolveRequestContext,
   prepareTransaction,
   summarizeTransaction,
   previewTransaction,

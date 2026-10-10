@@ -612,7 +612,7 @@ test("Test 8: a real MCP client can ask the phone through the MCP server", async
   );
 
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((t) => t.name).sort(), ["get_wallet_address", "request_transaction", "request_transfer"]);
+  assert.deepEqual(tools.map((t) => t.name).sort(), ["get_wallet_address", "request_token_transfer", "request_transaction", "request_transfer"]);
 
   const wallet = await client.callTool({ name: "get_wallet_address", arguments: {} });
   assert.equal(wallet.content[0].text, phone.address);

@@ -7,6 +7,7 @@
  * Tools:
  *   get_wallet_address   the paired phone wallet, so the agent can build transactions for it
  *   request_transfer     ask the phone to send SOL
+ *   request_token_transfer  ask the phone to send an SPL Token or Token-2022 token (SKR, USDC, ...)
  *   request_transaction  ask the phone to sign and send a transaction the agent built
  *
  * Setup: run `node agent/pair.js` once. The pairing it saves is used automatically.
@@ -21,7 +22,7 @@
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
-const { getWalletAddress, requestApproval } = require("./client");
+const { getWalletAddress, requestApproval, normalizeTokenAmount } = require("./client");
 const { resolveAgentConnection, resolveNetwork } = require("./credentials");
 
 // RELAY_URL / RELAY_TOKEN, or else the pairing saved by `node agent/pair.js`.
@@ -53,6 +54,22 @@ const TOOLS = [
         note: { type: "string", description: "One short line telling the user why you are asking", maxLength: 280 },
       },
       required: ["to", "sol"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "request_token_transfer",
+    description:
+      "Ask the user to approve sending a token (SPL Token or Token-2022, such as SKR or USDC) from their phone wallet. Give the token's mint address, the recipient's wallet address and the amount in whole tokens (like \"250\" or \"0.5\"); the phone reads the token's decimals from the mint itself and works out the token accounts. The request is for the network this server was started with (NETWORK, devnet by default) and the phone refuses it if it is on the other network. Blocks until the user approves or denies on their phone. You never receive the key; you get back a transaction signature or a refusal.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mint: { type: "string", description: "The token's mint address (base58). SKR on mainnet is SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3" },
+        to: { type: "string", description: "Recipient's wallet address (base58), not their token account" },
+        amount: { type: "string", description: 'Amount in whole tokens as a plain decimal, e.g. "250" or "0.5"' },
+        note: { type: "string", description: "One short line telling the user why you are asking", maxLength: 280 },
+      },
+      required: ["mint", "to", "amount"],
       additionalProperties: false,
     },
   },
@@ -112,6 +129,27 @@ async function callTool(name, args) {
       type: "transfer",
       to: args.to,
       lamports: Math.round(sol * 1_000_000_000),
+      note: typeof args.note === "string" ? args.note : "",
+      ...identity,
+    };
+    return describeOutcome(await requestApproval({ relay, token, payload, timeoutMs }));
+  }
+
+  if (name === "request_token_transfer") {
+    if (typeof args.mint !== "string" || typeof args.to !== "string") {
+      return text("request_token_transfer needs `mint`, `to` and `amount`.", true);
+    }
+    let amount;
+    try {
+      amount = normalizeTokenAmount(args.amount);
+    } catch (err) {
+      return text(`request_token_transfer: ${err.message}.`, true);
+    }
+    const payload = {
+      type: "token_transfer",
+      mint: args.mint,
+      to: args.to,
+      amount,
       note: typeof args.note === "string" ? args.note : "",
       ...identity,
     };

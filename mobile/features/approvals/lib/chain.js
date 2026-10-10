@@ -5,6 +5,7 @@
  * (real RPC) and in the laptop tests (local stand-in RPC).
  */
 
+const { Buffer } = require("buffer");
 const { NETWORKS } = require("./network");
 
 function sleep(ms) {
@@ -57,21 +58,43 @@ function rpcChain(connection, network) {
     },
 
     /**
-     * Dry-run a transaction that has not been signed yet and report the
-     * wallet's balance afterwards.
+     * Dry-run a transaction that has not been signed yet and report the wallet's balance afterwards,
+     * plus the state after of every address in `watch` (token accounts, for the token preview).
+     * @returns {{ err, postLamports, logs, accounts: ({ lamports, owner, data } | null)[] }}
+     *   `accounts` lines up with `watch`.
      */
-    async simulate(transaction, publicKey) {
+    async simulate(transaction, publicKey, watch = []) {
+      const addresses = [publicKey, ...watch].map((key) => (typeof key === "string" ? key : key.toBase58()));
       const { value } = await connection.simulateTransaction(transaction, {
         sigVerify: false,
         replaceRecentBlockhash: true,
-        accounts: { encoding: "base64", addresses: [publicKey.toBase58()] },
+        accounts: { encoding: "base64", addresses },
       });
-      const account = value.accounts && value.accounts[0];
+      const returned = value.accounts || [];
+      const account = returned[0];
       return {
         err: value.err || null,
         postLamports: account ? account.lamports : null,
         logs: value.logs || [],
+        accounts: watch.map((_key, index) => decodeAccount(returned[index + 1])),
       };
+    },
+
+    /**
+     * The accounts at these addresses right now: { lamports, owner, data } or null where there is none.
+     * @param addresses PublicKey[]
+     */
+    async getAccounts(addresses) {
+      const found = [];
+      for (let i = 0; i < addresses.length; i += 100) {
+        const infos = await connection.getMultipleAccountsInfo(addresses.slice(i, i + 100));
+        for (const info of infos) {
+          found.push(
+            info ? { lamports: info.lamports, owner: info.owner.toBase58(), data: new Uint8Array(info.data) } : null,
+          );
+        }
+      }
+      return found;
     },
 
     async getFee(message) {
@@ -105,6 +128,12 @@ function rpcChain(connection, network) {
       return { confirmed: false, err: "timeout" };
     },
   };
+}
+
+/** An account as the RPC returns it in a simulation (base64 data) -> { lamports, owner, data }, or null. */
+function decodeAccount(account) {
+  if (!account || !Array.isArray(account.data)) return null;
+  return { lamports: account.lamports, owner: account.owner, data: new Uint8Array(Buffer.from(account.data[0], "base64")) };
 }
 
 /** An ApprovalError, loaded lazily because approval.js requires this file's siblings. */
