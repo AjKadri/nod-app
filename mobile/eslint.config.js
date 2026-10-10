@@ -7,4 +7,9 @@ module.exports = defineConfig([
   {
     ignores: ['dist/*'],
   },
+  {
+    // app.config.js runs in Node when the app is built, where __dirname exists.
+    files: ['app.config.js'],
+    languageOptions: { globals: { __dirname: 'readonly' } },
+  },
 ])
