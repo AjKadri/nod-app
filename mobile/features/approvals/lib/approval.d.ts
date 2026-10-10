@@ -105,8 +105,6 @@ export function approveRequest(args: {
   walletAddress: PublicKey | string
   chain: Chain
   registry?: TokenRegistry
-  /** Refuse (with an error) when the transaction needs more than a plain transfer, e.g. a new token account. */
-  plainOnly?: boolean
   signAndSend: SignAndSend
 }): Promise<{ signature: string; refreshed: boolean }>
 export type { VersionedMessage }
