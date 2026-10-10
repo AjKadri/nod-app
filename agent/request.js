@@ -5,10 +5,6 @@
  *
  *   node agent/request.js transfer --to <ADDRESS> --sol 0.001
  *   node agent/request.js raw      --to <ADDRESS> --sol 0.001
- *   node agent/request.js token    --mint <MINT> --to <ADDRESS> --amount 250
- *
- * "token" asks to send an SPL Token or Token-2022 token (SKR, USDC, ...). --amount is in whole
- * tokens; the phone reads the token's decimals from the mint.
  *
  * "transfer" sends a description and lets the phone build the transaction.
  * "raw" builds the finished transaction here (what real agents and swap APIs
@@ -19,7 +15,7 @@
  *          --agent NAME  --icon NAME_OR_EMOJI   (how the phone shows this agent; env AGENT_NAME, AGENT_ICON)
  * Env:     RELAY_URL, RELAY_TOKEN, RPC_URL. Without them the pairing saved by agent/pair.js is used.
  */
-const { getWalletAddress, requestApproval, buildRawTransfer, normalizeTokenAmount } = require("./client");
+const { getWalletAddress, requestApproval, buildRawTransfer } = require("./client");
 const { resolveAgentConnection, resolveNetwork } = require("./credentials");
 const { NETWORKS } = require("../shared/network");
 
@@ -57,36 +53,20 @@ async function main() {
   const rpc = args.rpc || process.env.RPC_URL || NETWORKS[network].rpc;
   const timeoutMs = Number(args.timeout || 300) * 1000;
 
-  if (mode !== "transfer" && mode !== "raw" && mode !== "token") {
-    fail(
-      "Usage: node agent/request.js <transfer|raw> --to <ADDRESS> --sol <AMOUNT> [--note TEXT] [--hold SECONDS]\n" +
-        "       node agent/request.js token --mint <MINT> --to <ADDRESS> --amount <TOKENS> [--note TEXT]",
-    );
+  if (mode !== "transfer" && mode !== "raw") {
+    fail("Usage: node agent/request.js <transfer|raw> --to <ADDRESS> --sol <AMOUNT> [--note TEXT] [--hold SECONDS]");
   }
   if (typeof args.to !== "string") fail("--to <ADDRESS> is required");
-  let lamports = 0;
-  let tokenAmount = "";
-  if (mode === "token") {
-    if (typeof args.mint !== "string") fail("--mint <MINT> is required");
-    try {
-      tokenAmount = normalizeTokenAmount(args.amount);
-    } catch (err) {
-      fail(`--amount: ${err.message}`);
-    }
-  } else {
-    const sol = Number(args.sol);
-    if (!Number.isFinite(sol) || sol <= 0) fail("--sol must be a positive number, e.g. 0.001");
-    lamports = Math.round(sol * 1_000_000_000);
-  }
+  const sol = Number(args.sol);
+  if (!Number.isFinite(sol) || sol <= 0) fail("--sol must be a positive number, e.g. 0.001");
+  const lamports = Math.round(sol * 1_000_000_000);
   const note = typeof args.note === "string" ? args.note : `from laptop agent (${mode})`;
   const agent = String(typeof args.agent === "string" ? args.agent : process.env.AGENT_NAME || "laptop-script").slice(0, 60);
   const icon = String(typeof args.icon === "string" ? args.icon : process.env.AGENT_ICON || "").trim().slice(0, 32);
   const identity = { agent, network, ...(icon ? { agentIcon: icon } : {}) };
 
   let payload;
-  if (mode === "token") {
-    payload = { type: "token_transfer", mint: args.mint, to: args.to, amount: tokenAmount, note, ...identity };
-  } else if (mode === "transfer") {
+  if (mode === "transfer") {
     payload = { type: "transfer", to: args.to, lamports, note, ...identity };
   } else {
     const from = await getWalletAddress({ relay, token });

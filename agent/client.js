@@ -101,17 +101,4 @@ async function buildRawTransfer({ rpc, from, to, lamports }) {
   return { transactionBase64: Buffer.from(transaction.serialize()).toString("base64"), blockhash };
 }
 
-/**
- * A token amount as the phone wants it: a plain decimal string in whole tokens ("250", "0.5").
- * Accepts a string or a number; anything that is not a plain positive decimal is an error, so an
- * amount like 1e-7 or "ten" is never guessed at.
- */
-function normalizeTokenAmount(value) {
-  const text = typeof value === "number" && Number.isFinite(value) ? String(value) : typeof value === "string" ? value.trim() : "";
-  if (!/^\d{1,24}(\.\d{1,30})?$/.test(text) || !/[1-9]/.test(text)) {
-    throw new Error('amount must be a positive number of tokens written as a plain decimal, like "250" or "0.5"');
-  }
-  return text;
-}
-
-module.exports = { getWalletAddress, requestApproval, buildRawTransfer, normalizeTokenAmount };
+module.exports = { getWalletAddress, requestApproval, buildRawTransfer };

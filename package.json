@@ -14,7 +14,7 @@
     "demo": "node sim/demo.js",
     "demo:video": "node scripts/demo-video.js",
     "sync": "node scripts/sync-shared.js",
-    "test": "node scripts/sync-shared.js --check && node scripts/vps-bundle.js --check && node --test --test-timeout=30000 test/loop.test.js test/present.test.js test/pairing.test.js test/hosting.test.js test/agents.test.js test/autoapprove.test.js test/release.test.js test/demo-video.test.js test/network.test.js test/tokens.test.js",
+    "test": "node scripts/sync-shared.js --check && node scripts/vps-bundle.js --check && node --test --test-timeout=30000 test/loop.test.js test/present.test.js test/pairing.test.js test/hosting.test.js test/agents.test.js test/autoapprove.test.js test/release.test.js test/demo-video.test.js test/network.test.js",
     "pair": "node agent/pair.js"
   },
   "dependencies": {
