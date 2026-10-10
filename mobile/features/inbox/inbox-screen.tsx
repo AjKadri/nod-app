@@ -129,7 +129,7 @@ function PendingRow({ item, now, onPress }: { item: Item; now: number; onPress: 
         <Text style={{ color: tokens.text, fontSize: 16, fontWeight: '600' }} numberOfLines={1}>
           {agent}
         </Text>
-        <Label numberOfLines={1}>{summary}</Label>
+        <Label numberOfLines={2}>{summary}</Label>
         {item.autoRunning ? (
           <Text style={{ color: tokens.accentText, fontSize: 13 }}>Approving automatically…</Text>
         ) : null}

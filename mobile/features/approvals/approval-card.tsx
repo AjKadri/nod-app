@@ -2,9 +2,8 @@ import { Ionicons } from '@expo/vector-icons'
 import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import Animated, { SlideInDown } from 'react-native-reanimated'
-import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { AgentMark, DemoPill, DetailRow, Eyebrow, Label, NodButton, useNow, Wordmark } from '@/components/ui'
+import { AgentMark, DemoPill, DetailRow, Eyebrow, Label, NodButton, Screen, useNow, Wordmark } from '@/components/ui'
 import { radius, size, space } from '@/constants/theme'
 import { useNetwork } from '@/features/network/use-network'
 import { describeAgent } from './lib/agent'
@@ -56,12 +55,16 @@ export function ApprovalCard({
   }
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg }]}>
+    <Screen style={styles.screen}>
       <Animated.View
         entering={SlideInDown.duration(320)}
         style={[styles.card, { backgroundColor: tokens.surface, borderColor: tokens.line }]}
       >
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.headerRow}>
             <Wordmark />
             <View style={styles.headerRight}>
@@ -134,7 +137,7 @@ export function ApprovalCard({
           )}
         </View>
       </Animated.View>
-    </SafeAreaView>
+    </Screen>
   )
 }
 
@@ -282,7 +285,9 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
-  scroll: { gap: 20, padding: space.screen },
+  // flex: 1 and minHeight: 0 make the list take only the room above the footer, so the last rows can be scrolled into view.
+  scrollView: { flex: 1, minHeight: 0 },
+  scroll: { gap: 20, padding: space.screen, paddingBottom: space.screen * 2 },
   headerRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   headerRight: { alignItems: 'center', flexDirection: 'row', gap: 10 },
   agentRow: { alignItems: 'center', flexDirection: 'row', gap: 14 },

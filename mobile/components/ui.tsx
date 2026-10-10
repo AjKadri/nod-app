@@ -1,9 +1,41 @@
 import { Ionicons } from '@expo/vector-icons'
 import React, { PropsWithChildren, useEffect, useState } from 'react'
-import { Pressable, StyleProp, StyleSheet, Text, TextProps, TextStyle, View, ViewStyle } from 'react-native'
+import { Pressable, StyleProp, StyleSheet, Text, TextProps, TextStyle, View, ViewProps, ViewStyle } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
 import { radius, size } from '@/constants/theme'
 import type { AgentIcon, IconPreset } from '@/features/approvals/lib/agent'
+
+/**
+ * A full screen that keeps clear of the status bar and the navigation bar, whatever padding it has
+ * of its own. The system bars are transparent here, so anything that reaches under them is seen.
+ * The insets are added to the style's padding by hand, which does not depend on how a native
+ * SafeAreaView treats a style that already has padding.
+ */
+export function Screen({ style, children, ...rest }: ViewProps) {
+  const { tokens } = useTheme()
+  const insets = useSafeAreaInsets()
+  const flat = StyleSheet.flatten(style) ?? {}
+  const extra = (value: unknown, fallback: number) => (typeof value === 'number' ? value : fallback)
+  const base = extra(flat.padding, 0)
+  return (
+    <View
+      {...rest}
+      style={[
+        { backgroundColor: tokens.bg },
+        style,
+        {
+          paddingTop: extra(flat.paddingTop, base) + insets.top,
+          paddingBottom: extra(flat.paddingBottom, base) + insets.bottom,
+          paddingLeft: extra(flat.paddingLeft, base) + insets.left,
+          paddingRight: extra(flat.paddingRight, base) + insets.right,
+        },
+      ]}
+    >
+      {children}
+    </View>
+  )
+}
 
 /** The `nod.` wordmark. The dot uses the accent green. */
 export function Wordmark({ fontSize = 30 }: { fontSize?: number }) {

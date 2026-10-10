@@ -1,9 +1,8 @@
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router'
 import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { Label, NodButton } from '@/components/ui'
+import { Label, NodButton, Screen } from '@/components/ui'
 import { space } from '@/constants/theme'
 import { ApprovalCard } from '@/features/approvals/approval-card'
 import { useApprovals } from '@/features/approvals/approvals-provider'
@@ -35,21 +34,21 @@ export default function RequestScreen() {
 
   if (!gaveUp)
     return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg, alignItems: 'center' }]}>
+      <Screen style={[styles.screen, { alignItems: 'center' }]}>
         <ActivityIndicator color={tokens.muted} />
         <Label accessibilityRole="alert">Opening your request…</Label>
-      </SafeAreaView>
+      </Screen>
     )
 
   // Never sign for nobody: withdrawn, expired or answered elsewhere.
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg }]}>
+    <Screen style={styles.screen}>
       <Text style={{ color: tokens.text, fontSize: 28, fontWeight: '600' }}>No longer waiting</Text>
       <Label style={{ fontSize: 16, lineHeight: 24 }}>
         This request was withdrawn, expired or answered somewhere else, so there is nothing to approve.
       </Label>
       <NodButton title="Back to inbox" onPress={() => router.replace('/' as Href)} />
-    </SafeAreaView>
+    </Screen>
   )
 }
 

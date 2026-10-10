@@ -3,9 +3,8 @@ import { useRouter, type Href } from 'expo-router'
 import React, { useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import Animated, { FadeInUp } from 'react-native-reanimated'
-import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { Label, NodButton, Wordmark } from '@/components/ui'
+import { Label, NodButton, Screen, Wordmark } from '@/components/ui'
 import { space } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
 import { usePairings } from '@/features/pairing/pairing-provider'
@@ -34,7 +33,7 @@ export function WelcomeScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg }]}>
+    <Screen style={styles.screen}>
       <Animated.View entering={FadeInUp.duration(400)} style={styles.hero}>
         <Wordmark fontSize={72} />
         <Text style={[styles.line, { color: tokens.text }]}>Your agent asks.{'\n'}You nod.</Text>
@@ -64,7 +63,7 @@ export function WelcomeScreen() {
           accessibilityHint="Shows sample requests. No wallet needed and nothing is sent"
         />
       </View>
-    </SafeAreaView>
+    </Screen>
   )
 }
 

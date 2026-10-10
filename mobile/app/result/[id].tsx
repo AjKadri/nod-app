@@ -4,9 +4,8 @@ import * as WebBrowser from 'expo-web-browser'
 import React, { useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTheme } from '@/components/theme-provider'
-import { DemoPill, DetailRow, IconCircle, Label, NodButton } from '@/components/ui'
+import { DemoPill, DetailRow, IconCircle, Label, NodButton, Screen } from '@/components/ui'
 import { radius, space } from '@/constants/theme'
 import { useApprovals } from '@/features/approvals/approvals-provider'
 import { useNetwork } from '@/features/network/use-network'
@@ -39,11 +38,11 @@ export default function ResultScreen() {
 
   if (!entry) {
     return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg }]}>
+      <Screen style={styles.screen}>
         <Text style={{ color: tokens.text, fontSize: 28, fontWeight: '600' }}>Nothing here</Text>
         <Label style={{ fontSize: 16 }}>This request is not in your history.</Label>
         <NodButton title="Back to inbox" onPress={home} />
-      </SafeAreaView>
+      </Screen>
     )
   }
 
@@ -75,7 +74,7 @@ export default function ResultScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: tokens.bg }]}>
+    <Screen style={styles.screen}>
       <Animated.View entering={FadeIn.duration(300)} style={styles.center}>
         <IconCircle
           name={meta.icon === 'checkmark' ? 'checkmark' : meta.icon === 'close' ? 'close' : 'alert'}
@@ -136,7 +135,7 @@ export default function ResultScreen() {
         ) : null}
         <NodButton title="Done" onPress={home} />
       </View>
-    </SafeAreaView>
+    </Screen>
   )
 }
 
