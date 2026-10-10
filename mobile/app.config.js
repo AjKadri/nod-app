@@ -9,6 +9,8 @@ module.exports = ({ config }) => {
     ...config,
     android: {
       ...config.android,
+      // Each CI build gets a higher number, so a new APK installs over the old one.
+      versionCode: Number(process.env.NOD_VERSION_CODE) || 1,
       ...(hasFirebase ? { googleServicesFile: './google-services.json' } : {}),
     },
   }

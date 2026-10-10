@@ -20,6 +20,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: The installer and the site bundle carry the current relay and site
+        run: node scripts/vps-bundle.js --check
       - run: npm test
 
   app:
@@ -61,15 +63,39 @@ jobs:
             if (!names.includes("com.ajkadri.nod")) { console.error("::error::GOOGLE_SERVICES_JSON has no Android app with package name com.ajkadri.nod"); process.exit(1); }
           ' || { rm -f google-services.json; exit 1; }
           echo "google-services.json written; the build will include push."
+      - name: Release signing key (if the secrets exist)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ]; then
+            echo "::warning::No release signing secrets: this APK is signed with the debug key and will not match the key published for nod.ajkadri.dev."
+            exit 0
+          fi
+          KEYSTORE="$RUNNER_TEMP/nod-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+          # Fail early if the key or the passwords are wrong, without printing them.
+          keytool -list -keystore "$KEYSTORE" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" > /dev/null \
+            || { echo "::error::The signing secrets do not open the keystore (wrong password or alias)"; rm -f "$KEYSTORE"; exit 1; }
+          echo "NOD_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "NOD_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "NOD_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "Release signing key loaded."
       - name: Generate the Android project
+        env:
+          NOD_VERSION_CODE: ${{ github.run_number }}
         run: npx expo prebuild --platform android --no-install
-      - name: Build release APK (arm64)
+      - name: Build release APK (32-bit and 64-bit)
         working-directory: mobile/android
         run: ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a --no-daemon
       - name: Verify signature
         run: |
           APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
-          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | tee signer.txt
+          # With the release key loaded, the published fingerprint must be this one.
+          echo "Signing certificate SHA-256 (compare with site/.well-known/assetlinks.json):"
+          grep "SHA-256 digest" signer.txt || true
           ls -la android/app/build/outputs/apk/release/
       - uses: actions/upload-artifact@v4
         with:

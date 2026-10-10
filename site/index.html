@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nod</title>
+<meta name="description" content="Your agent asks. You nod. An approval app that shows what an AI agent's payment would really do, and signs only when you say so.">
+<meta name="theme-color" content="#151816">
+<meta property="og:title" content="Nod. Your agent asks. You nod.">
+<meta property="og:description" content="An AI agent asks to spend. Your phone shows what would really leave your wallet. You nod, your wallet signs.">
+<meta property="og:image" content="https://nod.ajkadri.dev/icon.png">
+<link rel="icon" href="/icon.png" type="image/png">
+<style>
+  :root {
+    --bg: #F3F5F1; --surface: #FFFFFF; --line: #D3DBD2; --text: #161A17; --muted: #5B655D;
+    --accent: #2F5A3E; --on-accent: #FFFFFF; --dot: #2F5A3E;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151816; --surface: #1C201D; --line: #343D37; --text: #EEF1EC; --muted: #98A29A;
+      --accent: #3E6B4D; --on-accent: #F3F6F1; --dot: #7FB591;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; color: var(--text); background: var(--bg);
+    font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 56px 24px 72px; }
+  .wordmark { font-size: 44px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; margin: 0; }
+  .wordmark span { color: var(--dot); }
+  h1 { font-size: clamp(34px, 8vw, 52px); line-height: 1.08; letter-spacing: -0.03em; font-weight: 700; margin: 56px 0 0; }
+  ol { list-style: none; padding: 0; margin: 40px 0 0; display: grid; gap: 22px; }
+  li { display: grid; grid-template-columns: 28px 1fr; gap: 14px; }
+  li b { font-weight: 600; }
+  .n { color: var(--dot); font-weight: 700; font-variant-numeric: tabular-nums; }
+  li p { margin: 0; color: var(--muted); }
+  li p strong { color: var(--text); font-weight: 600; }
+  .download { margin-top: 48px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+  .button {
+    display: inline-block; background: var(--accent); color: var(--on-accent); text-decoration: none;
+    font-weight: 600; padding: 15px 24px; border-radius: 16px;
+  }
+  .button:focus-visible, a:focus-visible { outline: 3px solid var(--dot); outline-offset: 3px; }
+  .small { color: var(--muted); font-size: 14px; }
+  a { color: inherit; }
+  #demo { margin-top: 56px; }
+  .slot {
+    aspect-ratio: 16 / 9; border: 1.5px dashed var(--line); border-radius: 20px; display: grid;
+    place-items: center; color: var(--muted); background: var(--surface); text-align: center; padding: 16px;
+  }
+  #demo video, #demo iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 20px; background: #000; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="wordmark" aria-label="nod">nod<span>.</span></p>
+  <h1>Your agent asks. You nod.</h1>
+
+  <ol>
+    <li><span class="n">1</span><p><strong>Your agent asks.</strong> When an AI agent wants to spend SOL, it sends a request to your phone. It never touches a key.</p></li>
+    <li><span class="n">2</span><p><strong>Your phone shows the truth.</strong> Nod simulates the transaction and shows what would really leave your wallet, whatever the agent says it is.</p></li>
+    <li><span class="n">3</span><p><strong>You nod.</strong> Your wallet signs and the agent gets the signature. Reject it, or pause everything, and the agent is told to stop.</p></li>
+  </ol>
+
+  <div class="download">
+    <a class="button" href="https://github.com/AjKadri/nod-app/raw/build-artifacts/nod.apk" download>Download for Android</a>
+    <span class="small">APK, Android 7 or newer. Works with Solana devnet.</span>
+  </div>
+  <p class="small">Your phone may ask you to allow installs from your browser. Checksums are in <a href="https://github.com/AjKadri/nod-app/raw/build-artifacts/SHA256SUMS">SHA256SUMS</a>.</p>
+
+  <section id="demo" aria-label="Demo video">
+    <!-- DEMO VIDEO: replace the placeholder div with <video src="/demo.mp4" controls playsinline poster="/icon.png"></video>
+         (put demo.mp4 in /var/www/nod on the server) or with a YouTube/Loom <iframe src="..." allowfullscreen></iframe>. -->
+    <div class="slot">Demo video coming soon</div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/AjKadri/nod-app">Source on GitHub</a>
+  </footer>
+</main>
+</body>
+</html>
