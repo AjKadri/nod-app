@@ -17,12 +17,20 @@
  *   7. The recipient is an address the person approved by hand before, with no warning showing.
  *   8. That money fits in what is left of today's limit. Today ends at local midnight.
  *
+ * Tokens follow the same rules with a limit per token (SOL and SKR): a plain token transfer is one
+ * transfer instruction of one token program, one token leaving the wallet and the same amount
+ * arriving at one recipient (from the simulation), no new token account to pay for, the network fee
+ * as the only SOL cost, a recipient the person approved by hand, a token Nod names (an official mint,
+ * never one that only claims a name), and an amount that fits what is left of today's limit for
+ * that token. The fee of a token payment is recorded in the SOL ledger.
+ *
  * Today's limit is spent by every payment that left the wallet through Nod, approved by hand or
  * automatically, fee included. A payment counts as soon as it is sent, even if it did not confirm,
  * because the money may have moved.
  */
 const { LAMPORTS_PER_SOL, formatSol } = require("./approval");
 const { presentReview } = require("./present");
+const tokens = require("./tokens");
 
 const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
 const MAX_LIMIT_LAMPORTS = 100 * LAMPORTS_PER_SOL;
@@ -31,7 +39,9 @@ const MAX_LEDGER_ENTRIES = 500;
 const ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const DEFAULT_FEE_LAMPORTS = 5_000;
 
-const OFF = Object.freeze({ enabled: false, limitLamports: 0 });
+const OFF = Object.freeze({ enabled: false, limitLamports: 0, tokenLimits: Object.freeze({}) });
+const RAW_RE = /^\d{1,40}$/;
+const LIMIT_TEXT_RE = /^\d{1,12}(?:\.\d{1,9})?$/;
 
 // ------------------------------------------------------------------ amounts
 
@@ -49,6 +59,27 @@ function parseSolToLamports(text) {
   const lamports = whole * LAMPORTS_PER_SOL + fraction;
   if (!Number.isSafeInteger(lamports) || lamports <= 0 || lamports > MAX_LIMIT_LAMPORTS) return null;
   return lamports;
+}
+
+/**
+ * A token limit as typed ("100", "0,5") -> the normal text "100" / "0.5", or null if it is not a
+ * plain positive amount (at most 12 whole digits and 9 decimals). It is turned into whole units of
+ * the token only when it is used, with the decimals read from the token's mint.
+ */
+function normalizeTokenLimit(text) {
+  if (typeof text !== "string") return null;
+  const clean = text.trim().replace(",", ".");
+  if (!LIMIT_TEXT_RE.test(clean)) return null;
+  const [whole, fraction = ""] = clean.split(".");
+  const trimmed = fraction.replace(/0+$/, "");
+  const normal = `${whole.replace(/^0+(?=\d)/, "")}${trimmed ? "." + trimmed : ""}`;
+  return /[1-9]/.test(normal) ? normal : null;
+}
+
+/** The limit for one token in whole units, or null when none is set (or it does not fit the token). */
+function tokenLimitRaw(settings, mint, decimals) {
+  const text = settings && settings.tokenLimits && settings.tokenLimits[mint];
+  return typeof text === "string" ? tokens.parseTokenAmount(text, decimals) : null;
 }
 
 // ------------------------------------------------------------------ today
@@ -72,6 +103,30 @@ function spentToday(ledger, now) {
 /** What is left of today's limit, counting payments still in progress. Never below zero. */
 function remainingLamports({ limitLamports, ledger, reservedLamports = 0, now }) {
   return Math.max(0, limitLamports - spentToday(ledger, now) - reservedLamports);
+}
+
+/** What has left the wallet of one token since local midnight, in whole units of the token (BigInt). */
+function spentTodayToken(ledger, mint, now) {
+  const start = startOfLocalDay(now);
+  let sum = 0n;
+  for (const entry of Array.isArray(ledger) ? ledger : []) {
+    if (!entry || !(entry.at >= start) || !Array.isArray(entry.tokens)) continue;
+    for (const item of entry.tokens) {
+      if (item && item.mint === mint && typeof item.raw === "string" && RAW_RE.test(item.raw)) sum += BigInt(item.raw);
+    }
+  }
+  return sum;
+}
+
+/**
+ * What is left of today's limit for one token, counting payments still in progress. Never below
+ * zero. `reserved` is [{ mint, raw }] for payments started but not finished.
+ */
+function remainingToken({ limitRaw, ledger, reserved = [], mint, now }) {
+  let held = 0n;
+  for (const item of reserved) if (item && item.mint === mint && typeof item.raw === "string" && RAW_RE.test(item.raw)) held += BigInt(item.raw);
+  const left = BigInt(limitRaw) - spentTodayToken(ledger, mint, now) - held;
+  return left > 0n ? left : 0n;
 }
 
 /** Keep yesterday and today only: older entries can no longer count. */
@@ -112,6 +167,67 @@ function plainSolTransfer(review, walletAddress) {
   return { to: transfer.to, lamports: transfer.lamports };
 }
 
+/**
+ * The token a review moves out of the wallet: { mint, raw (string), decimals }, or null when no token
+ * leaves it. Read from the simulation only.
+ */
+function tokenOutflows(review) {
+  const view = review && review.preview && review.preview.tokens;
+  if (!view || !Array.isArray(view.changes)) return [];
+  const out = [];
+  for (const change of view.changes) {
+    try {
+      const delta = BigInt(change.deltaRaw);
+      if (delta < 0n) out.push({ mint: change.mint, raw: (-delta).toString(), decimals: change.decimals });
+    } catch (_err) {
+      // an unreadable amount is not counted here; the review shows a warning for an incomplete view
+    }
+  }
+  return out;
+}
+
+/**
+ * If (and only if) this review is one token transfer out of `walletAddress`:
+ * { mint, raw (string), decimals, to (the recipient's address, the owner of the receiving account),
+ *   createsAccount }. With `allowCreate` false, anything that creates a token account is refused.
+ */
+function tokenTransfer(review, walletAddress, { allowCreate = false } = {}) {
+  const summary = review && review.summary;
+  const view = review && review.preview && review.preview.tokens;
+  if (!summary || !view || typeof walletAddress !== "string" || !walletAddress) return null;
+  if (!Array.isArray(summary.tokenInstructions) || !Array.isArray(summary.programs)) return null;
+  if (summary.usesLookupTables || summary.signerCount !== 1 || review.signerCount !== 1) return null;
+  if (!Array.isArray(summary.unknownPrograms) || summary.unknownPrograms.length !== 0) return null;
+  if (Array.isArray(summary.tokenDangers) && summary.tokenDangers.length > 0) return null;
+  if (Array.isArray(summary.transfers) && summary.transfers.length > 0) return null;
+
+  const kinds = summary.tokenInstructions;
+  const transfers = kinds.filter((kind) => kind === "transfer").length;
+  const creates = kinds.filter((kind) => kind === "createAta").length;
+  if (transfers !== 1 || kinds.length !== summary.instructionCount || kinds.length !== transfers + creates) return null;
+  if (creates > 0 && !allowCreate) return null;
+  if (creates > 1) return null;
+
+  if (view.complete !== true || view.error || !Array.isArray(view.changes) || !Array.isArray(view.others) || !Array.isArray(view.created)) return null;
+  if (!allowCreate && view.created.length !== 0) return null;
+  if (view.changes.length !== 1 || view.others.length !== 1) return null;
+  const sent = view.changes[0];
+  const received = view.others[0];
+  let out;
+  let into;
+  try {
+    out = BigInt(sent.deltaRaw);
+    into = BigInt(received.deltaRaw);
+  } catch (_err) {
+    return null;
+  }
+  // Exactly what leaves arrives: a token that skims a fee on the way is not "plain".
+  if (out >= 0n || into !== -out || sent.mint !== received.mint) return null;
+  if (typeof received.owner !== "string" || !ADDRESS_RE.test(received.owner) || received.owner === walletAddress) return null;
+  if (!Number.isInteger(sent.decimals)) return null;
+  return { mint: sent.mint, raw: (-out).toString(), decimals: sent.decimals, to: received.owner, createsAccount: creates > 0 };
+}
+
 // ------------------------------------------------------------------ the decision
 
 /** True while sends must wait for a person: paused, or a pause the person asked for is unconfirmed. */
@@ -119,8 +235,14 @@ function isPausedForAuto({ pauseState, unconfirmedPause = false }) {
   return pauseState !== "off" || unconfirmedPause === true;
 }
 
+function hasTokenLimit(settings) {
+  return !!settings && !!settings.tokenLimits && Object.keys(settings.tokenLimits).length > 0;
+}
+
+/** Auto-approve is in use: switched on, with a limit for SOL or for at least one token. */
 function isEnabled(settings) {
-  return !!settings && settings.enabled === true && Number.isSafeInteger(settings.limitLamports) && settings.limitLamports > 0;
+  if (!settings || settings.enabled !== true) return false;
+  return (Number.isSafeInteger(settings.limitLamports) && settings.limitLamports > 0) || hasTokenLimit(settings);
 }
 
 /**
@@ -130,9 +252,10 @@ function isEnabled(settings) {
  * @param knownAddresses  addresses the person approved by hand
  * @param ledger          [{ id, at, lamports }] payments that left the wallet
  * @param reservedLamports money for payments started but not finished
+ * @param reservedTokens  [{ mint, raw }] tokens for payments started but not finished
  * @param paused          see isPausedForAuto()
  * @param appActive       Nod is on screen
- * @returns {{ auto: true, outflowLamports: number, to: string } | { auto: false, code: string, reason: string }}
+ * @returns {{ auto: true, outflowLamports: number, to: string, token?: { mint, raw } } | { auto: false, code: string, reason: string }}
  *   `code` is "off" when auto-approve is simply not in use: nothing is worth telling the person.
  */
 function decideAutoApprove({
@@ -142,6 +265,7 @@ function decideAutoApprove({
   knownAddresses = [],
   ledger = [],
   reservedLamports = 0,
+  reservedTokens = [],
   now,
   paused,
   appActive,
@@ -158,7 +282,14 @@ function decideAutoApprove({
   if (presentReview(review).warnings.length > 0) return no("warnings", "There is a warning on this request, so it needs you.");
 
   const transfer = plainSolTransfer(review, walletAddress);
-  if (!transfer) return no("not_plain", "Only plain SOL transfers are approved automatically.");
+  if (!transfer) {
+    const token = tokenTransfer(review, walletAddress);
+    if (!token) return no("not_plain", "Only plain SOL and token transfers are approved automatically.");
+    return decideToken({ review, settings, token, knownAddresses, ledger, reservedTokens, now });
+  }
+  if (!(Number.isSafeInteger(settings.limitLamports) && settings.limitLamports > 0)) {
+    return no("no_limit", "There is no daily limit for SOL, so it needs you.");
+  }
 
   const fee = review.preview.feeLamports;
   const outflow = Number.isSafeInteger(review.preview.deltaLamports) ? -review.preview.deltaLamports : NaN;
@@ -177,6 +308,32 @@ function decideAutoApprove({
   return { auto: true, outflowLamports: outflow, to: transfer.to };
 }
 
+/** The token half of the decision. Everything before it (switch, pause, screen, warnings) already held. */
+function decideToken({ review, settings, token, knownAddresses, ledger, reservedTokens, now }) {
+  const no = (code, reason) => ({ auto: false, code, reason });
+  const label = tokens.tokenLabel(review.registry, token.mint);
+
+  // Only a token Nod names. A mint that merely calls itself something never gets here.
+  if (!review.registry || !review.registry.tokens || !review.registry.tokens[token.mint]) {
+    return no("unknown_token", "Nod does not know this token, so it needs you.");
+  }
+  const fee = review.preview.feeLamports;
+  const outflow = Number.isSafeInteger(review.preview.deltaLamports) ? -review.preview.deltaLamports : NaN;
+  if (!Number.isSafeInteger(fee) || fee < 0 || !(outflow >= 0 && outflow <= fee)) {
+    return no("amounts", "The amounts do not add up, so it needs you.");
+  }
+  if (!Array.isArray(knownAddresses) || !knownAddresses.includes(token.to)) {
+    return no("unknown_recipient", "First payment to this address: approve it yourself once.");
+  }
+  const limitRaw = tokenLimitRaw(settings, token.mint, token.decimals);
+  if (limitRaw === null) return no("no_limit", `There is no daily limit for ${label}, so it needs you.`);
+  const remaining = remainingToken({ limitRaw, ledger, reserved: reservedTokens, mint: token.mint, now });
+  if (BigInt(token.raw) > remaining) {
+    return no("over_limit", `Over what is left of today's ${label} limit (${tokens.formatTokenAmount(remaining, token.decimals)} ${label}), so it needs you.`);
+  }
+  return { auto: true, outflowLamports: outflow, to: token.to, token: { mint: token.mint, raw: token.raw } };
+}
+
 // ------------------------------------------------------------------ what to remember afterwards
 
 /**
@@ -189,7 +346,11 @@ function addressToLearn({ review, outcome, walletAddress }) {
   if (!review || !review.preview || review.preview.ok !== true) return null;
   if (presentReview(review).warnings.length > 0) return null;
   const transfer = plainSolTransfer(review, walletAddress);
-  return transfer ? transfer.to : null;
+  if (transfer) return transfer.to;
+  // A token payment the person approved teaches the recipient too, also when it had to create
+  // their token account (the next one will not).
+  const token = tokenTransfer(review, walletAddress, { allowCreate: true });
+  return token ? token.to : null;
 }
 
 /**
@@ -206,7 +367,10 @@ function ledgerEntryFor({ id, review, outcome, now, maybeSent = false }) {
     const fee = review && review.preview && Number.isSafeInteger(review.preview.feeLamports) ? review.preview.feeLamports : DEFAULT_FEE_LAMPORTS;
     return { id, at: now, lamports: fee };
   }
-  return { id, at: now, lamports: outflowLamports(review) };
+  const entry = { id, at: now, lamports: outflowLamports(review) };
+  const out = tokenOutflows(review).map(({ mint, raw }) => ({ mint, raw }));
+  if (out.length > 0) entry.tokens = out;
+  return entry;
 }
 
 /** Add an address, newest first, no duplicates, at most 200. */
@@ -239,14 +403,30 @@ function parseStored(text) {
 
   const settings = { ...OFF };
   const raw = data.settings;
+  const tokenLimits = {};
+  if (raw && raw.tokenLimits && typeof raw.tokenLimits === "object") {
+    for (const [mint, text] of Object.entries(raw.tokenLimits)) {
+      const normal = ADDRESS_RE.test(mint) ? normalizeTokenLimit(text) : null;
+      if (normal) tokenLimits[mint] = normal;
+    }
+  }
+  settings.tokenLimits = tokenLimits;
   if (raw && Number.isSafeInteger(raw.limitLamports) && raw.limitLamports > 0 && raw.limitLamports <= MAX_LIMIT_LAMPORTS) {
     settings.limitLamports = raw.limitLamports;
-    settings.enabled = raw.enabled === true;
   }
+  // The switch counts only when there is a limit to apply it to.
+  if (raw && raw.enabled === true && (settings.limitLamports > 0 || Object.keys(tokenLimits).length > 0)) settings.enabled = true;
   const known = (Array.isArray(data.known) ? data.known : []).filter((a) => typeof a === "string" && ADDRESS_RE.test(a)).slice(0, MAX_KNOWN_ADDRESSES);
   const ledger = (Array.isArray(data.ledger) ? data.ledger : [])
     .filter((e) => e && typeof e.id === "string" && Number.isFinite(e.at) && Number.isSafeInteger(e.lamports) && e.lamports >= 0)
-    .map((e) => ({ id: e.id.slice(0, 64), at: e.at, lamports: e.lamports }))
+    .map((e) => {
+      const entry = { id: e.id.slice(0, 64), at: e.at, lamports: e.lamports };
+      const items = (Array.isArray(e.tokens) ? e.tokens : [])
+        .filter((t) => t && typeof t.mint === "string" && ADDRESS_RE.test(t.mint) && typeof t.raw === "string" && RAW_RE.test(t.raw))
+        .map((t) => ({ mint: t.mint, raw: t.raw }));
+      if (items.length > 0) entry.tokens = items;
+      return entry;
+    })
     .slice(-MAX_LEDGER_ENTRIES);
   return { settings, known, ledger };
 }
@@ -255,11 +435,17 @@ module.exports = {
   MAX_LIMIT_LAMPORTS,
   MAX_KNOWN_ADDRESSES,
   parseSolToLamports,
+  normalizeTokenLimit,
+  tokenLimitRaw,
   startOfLocalDay,
   spentToday,
+  spentTodayToken,
   remainingLamports,
+  remainingToken,
   pruneLedger,
   outflowLamports,
+  tokenOutflows,
+  tokenTransfer,
   plainSolTransfer,
   isPausedForAuto,
   isEnabled,

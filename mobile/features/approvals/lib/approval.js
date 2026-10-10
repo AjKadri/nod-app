@@ -461,10 +461,15 @@ async function reviewRequest({ payload, walletAddress, chain, registry }) {
  * @param signAndSend async (transaction, minContextSlot) => base58 signature
  * @returns {{ signature: string, refreshed: boolean }}
  */
-async function approveRequest({ payload, walletAddress, chain, signAndSend }) {
+async function approveRequest({ payload, walletAddress, chain, signAndSend, plainOnly = false }) {
   const request = validateRequest(payload);
   await assertNetwork(request, chain);
   const context = await resolveRequestContext(request, walletAddress, chain);
+  // Auto-approve only covers a transfer that needs no new token account. If the recipient's account
+  // went missing since the check, the transaction would spend rent too: it goes back to the card.
+  if (plainOnly && context.token && context.token.createRecipientAta) {
+    throw new ApprovalError("changed", "The recipient’s token account changed since the check, so this needs your approval.");
+  }
   const latest = await chain.getLatestBlockhash();
   const prepared = prepareTransaction(request, walletAddress, latest.blockhash, context);
   const signature = await signAndSend(prepared.transaction, latest.slot);

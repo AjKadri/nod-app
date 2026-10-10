@@ -90,6 +90,7 @@ async function submitAutoApproval({ request, walletAddress, chain, signAndSend, 
       payload: request.payload,
       walletAddress,
       chain,
+      plainOnly: true,
       signAndSend: (transaction, minContextSlot) => {
         signing = true;
         return signAndSend(transaction, minContextSlot);

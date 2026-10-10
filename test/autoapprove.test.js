@@ -509,12 +509,12 @@ test("ledger: sent but not confirmed in time counts in full (it may still land)"
 // ---------------------------------------------------------------- saved state
 
 test("saved state: round trip", () => {
-  const stored = { settings: SETTINGS, known: [FRIEND], ledger: [{ id: "a", at: NOW, lamports: 5 }] };
+  const stored = { settings: { ...SETTINGS, tokenLimits: {} }, known: [FRIEND], ledger: [{ id: "a", at: NOW, lamports: 5 }] };
   assert.deepEqual(parseStored(JSON.stringify(stored)), stored);
 });
 
 test("saved state: damaged storage means off, nothing known, nothing spent", () => {
-  const empty = { settings: { enabled: false, limitLamports: 0 }, known: [], ledger: [] };
+  const empty = { settings: { enabled: false, limitLamports: 0, tokenLimits: {} }, known: [], ledger: [] };
   for (const text of ["", "not json", "null", "[]", "42", '"x"', undefined]) {
     assert.deepEqual(parseStored(text), empty, String(text));
   }
@@ -528,7 +528,7 @@ test("saved state: bad pieces are dropped, good ones kept", () => {
       ledger: [{ id: "a", at: NOW, lamports: 5 }, { id: 7, at: NOW, lamports: 5 }, { id: "b", at: "x", lamports: 5 }, { id: "c", at: NOW, lamports: -1 }],
     }),
   );
-  assert.deepEqual(parsed.settings, { enabled: false, limitLamports: 0 });
+  assert.deepEqual(parsed.settings, { enabled: false, limitLamports: 0, tokenLimits: {} });
   assert.deepEqual(parsed.known, [FRIEND]);
   assert.deepEqual(parsed.ledger, [{ id: "a", at: NOW, lamports: 5 }]);
   // A limit above the largest allowed one is not trusted.
