@@ -1,6 +1,6 @@
 {
   "name": "nod",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Nod: your AI agent asks, your phone approves, your mobile wallet signs.",
   "license": "MIT",
@@ -12,8 +12,9 @@
     "phone:sim": "node sim/phone.js",
     "local-rpc": "node sim/local-rpc.js",
     "demo": "node sim/demo.js",
+    "demo:video": "node scripts/demo-video.js",
     "sync": "node scripts/sync-shared.js",
-    "test": "node scripts/sync-shared.js --check && node scripts/vps-bundle.js --check && node --test --test-timeout=30000 test/loop.test.js test/present.test.js test/pairing.test.js test/hosting.test.js test/agents.test.js test/autoapprove.test.js test/release.test.js",
+    "test": "node scripts/sync-shared.js --check && node scripts/vps-bundle.js --check && node --test --test-timeout=30000 test/loop.test.js test/present.test.js test/pairing.test.js test/hosting.test.js test/agents.test.js test/autoapprove.test.js test/release.test.js test/demo-video.test.js",
     "pair": "node agent/pair.js"
   },
   "dependencies": {
