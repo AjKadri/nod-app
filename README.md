@@ -1,166 +1,146 @@
 # Nod
 
-Your agent asks. You nod.
+**Your agent asks. You nod.** An AI agent asks for a Solana transaction, your phone shows what it would really do, you nod, and your mobile wallet signs. The agent never holds your key.
 
-*(Feasibility spike for the Solana Mobile CLOCK IN hackathon.)*
+- Demo video: *link coming soon*
+- Deck: *link coming soon*
+- Site and APK: https://nod.ajkadri.dev
 
-An AI agent on your laptop asks for a transaction. Your phone shows what it would really do. You approve. Your mobile wallet signs. The agent gets a signature back. The agent never holds your key.
+Built for the Solana Mobile CLOCK IN hackathon. Android, Solana devnet, MIT licensed.
 
-This folder is the feasibility test from `FEASIBILITY-TEST.md`, with everything that does not need a phone already built and tested.
+## Try it in 60 seconds
 
-## Where the feasibility tests stand
+No wallet, no laptop, no setup.
 
-| Test | Status | What is left |
-|---|---|---|
-| 1 Toolchain | App project ready. It type-checks, lints, and its Android JavaScript bundle builds. **Never run on a device.** | `npm install` and `npm run android` in `mobile/` |
-| 2 Wallet signs on devnet | Not run. The template has a "Sign transaction" button for exactly this. | Install the mock wallet, connect, tap the button |
-| 3 Remote request loop | **Passes on the laptop** with a simulated phone. | Repeat with the real app |
-| 4 Stale blockhash | **Passes on the laptop**, including a human who is slow to approve. | Repeat with the real app (`--hold 180`) |
-| 5 Preview | **Passes on the laptop**: the previewed amount equals what left the wallet. | Confirm against real devnet (see the note below) |
-| 6 Push | Relay side done and tested. App side not written. | Add `expo-notifications` in the app |
-| 7 Signed APK | Not possible from the build machine. Build profile is in `mobile/eas.json`. | `eas build`, install, re-run Test 3 |
-| 8 Real agent | **Passes on the laptop**: a real MCP client drives the loop through `agent/mcp-server.js`. | Point Codex, Claude Code or Cursor at it |
-| 9 Delegation program on mainnet | Not checked. | The two `solana program show` commands |
+1. On an Android phone, open https://nod.ajkadri.dev and download the APK (`/nod.apk`; checksum at `/SHA256SUMS`). Allow installing from your browser when Android asks. It runs on 32-bit and 64-bit phones.
+2. Open Nod and tap **Try demo**.
+3. Open a request. You see the *simulated* result of the transaction, not what the agent claims. One sample request is a "tiny test payment" that really sends far more; the card shows the real amount.
 
-"Passes on the laptop" means: real relay, real agent client, real MCP server, real `@solana/web3.js`, and the real Solana runtime (LiteSVM) behind a local RPC stand-in. The two stand-ins are the phone (a terminal program that signs with a test key instead of a mobile wallet) and devnet. The approval logic itself is the same code the phone app runs.
+Demo mode uses sample data. Nothing is signed or sent, and it never touches a wallet or the network.
 
-**So the open risk is only the Android part:** the app starting on a device, the Mobile Wallet Adapter hand-off to the wallet, the WebSocket from the phone to the relay, and the release build.
+## Run the whole thing
 
-## Part 1: prove the loop on your laptop (2 minutes)
-
-Needs Node 20 or newer. No Android, no internet after install.
+You need Node 20 or newer. No Android, no accounts, no internet after install.
 
 ```bash
+git clone https://github.com/AjKadri/nod-app.git nod
+cd nod
 npm install
-npm test        # 24 tests, about 5 seconds
-npm run demo    # the loop in four situations, printed step by step
+npm test          # about 190 tests
+npm run demo      # the whole loop in four situations, printed step by step
 ```
 
-To drive it by hand, use three terminals:
+`npm run demo` starts a relay, an offline Solana (the real Solana runtime, LiteSVM, behind a local RPC), a pretend phone and an agent, and walks through: an approved payment, a denied one, a slow approval whose transaction would have expired (it is refreshed), and a tricked agent whose "tiny test payment" really sends 0.9 SOL.
+
+### Drive it by hand
+
+Four terminals, still fully offline:
 
 ```bash
-npm run local-rpc                                   # 1: offline Solana stand-in on :8899
-npm run relay                                       # 2: relay on :8787
-npm run phone:sim -- --rpc http://127.0.0.1:8899 --airdrop   # 3: pretend phone, asks y/n
+npm run local-rpc                                            # 1: offline Solana on :8899
+npm run relay                                                # 2: the relay on :8787
+npm run phone:sim -- --rpc http://127.0.0.1:8899 --airdrop   # 3: a terminal "phone" that asks y/n
+node agent/request.js transfer --to <ANY_ADDRESS> --sol 0.001 --rpc http://127.0.0.1:8899   # 4: you are the agent
 ```
 
-Then, in a fourth terminal, be the agent:
+Use `node agent/request.js raw ...` to send a finished transaction instead of a description (how real swap APIs behave). Drop `--rpc` to use real devnet.
+
+### With the real phone app
+
+The app and the relay pair with a one-time code:
 
 ```bash
-node agent/request.js transfer --to <ANY_ADDRESS> --sol 0.001 --rpc http://127.0.0.1:8899
-node agent/request.js raw      --to <ANY_ADDRESS> --sol 0.001 --rpc http://127.0.0.1:8899
+npm run relay            # on your laptop
+npm run pair             # shows a QR code; in the app choose "Pair with laptop" and scan it
 ```
 
-Drop `--rpc ...` everywhere to use real devnet (the pretend phone prints a test address to fund at https://faucet.solana.com).
+Release builds (the APK) only talk to **HTTPS** relays, so a local `http://` relay needs either a debug build (`cd mobile && npm install && npm run android`, with `adb reverse tcp:8787 tcp:8787`) or an HTTPS tunnel. To host your own relay see [docs/hosting.md](docs/hosting.md) (Fly.io) or [deploy/vps/](deploy/vps/) (one-script setup on a VPS with Caddy). The relay at `relay.ajkadri.dev` needs a registration key that only the author has.
 
-## Part 2: the phone (what is left of the feasibility test)
-
-Prerequisites are the same as `FEASIBILITY-TEST.md`: Android Studio with the SDK, JDK 17, a phone with USB debugging (or an emulator), and the Mock MWA Wallet built from https://github.com/solana-mobile/mock-mwa-wallet and installed.
+Once paired, from the laptop:
 
 ```bash
-cd mobile
-npm install
-adb reverse tcp:8787 tcp:8787     # lets "localhost:8787" on the phone reach your laptop
-npm run android                   # Test 1 passes when the app opens
+node agent/request.js transfer --to <DEVNET_ADDRESS> --sol 0.001 --note "hello"
 ```
 
-In another terminal, from this folder: `npm run relay`, then pair the phone with this laptop:
+The request shows up on the phone, you approve, the wallet signs, and the signature prints on the laptop. `npm run pair -- --status` shows the pairing, `npm run pair -- --revoke` ends it. The laptop's key is kept in `~/.nod/agent.json`.
+
+### Connect a real agent
+
+Nod ships an MCP server (`agent/mcp-server.js`) with three tools: `get_wallet_address`, `request_transfer` and `request_transaction`. Short guides with the exact commands:
+
+[Claude Code](docs/agents/claude-code.md) · [Cursor](docs/agents/cursor.md) · [Codex](docs/agents/codex.md) · [OpenClaw](docs/agents/openclaw.md)
+
+Then ask the agent: "send 0.001 SOL to `<ADDRESS>` on devnet". `AGENT_NAME` (and optionally `AGENT_ICON`) set how the phone labels each agent.
+
+### Replay the demo video
+
+With the phone paired and a devnet address you own:
 
 ```bash
-npm run pair      # shows a QR code (add --relay http://<laptop-ip>:8787 for a phone that is not on adb reverse)
+NOD_DEMO_RECIPIENT=<DEVNET_ADDRESS> npm run demo:video
 ```
 
-In the app choose **Pair with laptop** and scan the code (or paste the `nod://pair…` line). The code works once and expires after 10 minutes. `npm run pair -- --status` shows whether the phone is connected, and `npm run pair -- --revoke` ends the pairing from the laptop. In the app, **Settings → Paired laptops → Unpair** ends it from the phone. The laptop keeps its key in `~/.nod/agent.json`; agents started by the MCP server pick it up on their own.
+It waits for you to press Enter before each of three requests: a normal 0.002 SOL one from "Research agent"; a "Trading agent" that says *tiny 0.001 SOL test payment* but sends 0.03 SOL; and a repeat 0.001 SOL payment that auto-approves. Before you start, switch on auto-approve in the app's Settings with a daily limit of about 0.01 SOL. Use `--only a,c` to run only some steps.
 
-1. **Test 2.** In the mock wallet press **Authenticate** (valid for 15 minutes). In the app press **Connect**, fund the shown address with devnet SOL, press **Sign transaction**. Pass: it confirms on a devnet explorer.
-2. **Test 3.** The app's Approvals card should say `Relay online`. Run `node agent/request.js transfer --to <ADDRESS> --sol 0.001`. Pass: the request appears within 2 seconds, Approve prints a signature on the laptop, Deny prints `DENIED`.
-3. **Test 4.** Run `node agent/request.js raw --to <ADDRESS> --sol 0.001 --hold 180`, then approve. Pass: it still confirms.
-4. **Test 5.** Compare the app's "You send ..." line with the wallet's balance change on the explorer.
-5. **Test 7.** `eas build --platform android --profile dapp-store`, then `apksigner verify --print-certs`, `adb install`, and repeat Test 3. Back up the keystore EAS creates.
-
-If the wallet signs but fails to send (the Test 2 fallback), start the app with `EXPO_PUBLIC_WALLET_SENDS=1 npm run android`: the wallet then signs and sends (Nod broadcasts by default).
-
-If the phone cannot reach the relay: check `adb reverse --list`, and `curl http://localhost:8787/health` on the laptop.
-
-### Connecting a real agent (Test 8)
-
-One short guide per agent, with the exact commands: [Claude Code](docs/agents/claude-code.md), [Cursor](docs/agents/cursor.md), [Codex](docs/agents/codex.md), [OpenClaw](docs/agents/openclaw.md). For any other MCP client, add this to its MCP config, with the real path:
-
-```json
-{
-  "mcpServers": {
-    "phone-approvals": {
-      "command": "node",
-      "args": ["/absolute/path/to/agent/mcp-server.js"],
-      "env": { "RELAY_URL": "http://localhost:8787", "AGENT_NAME": "codex" }
-    }
-  }
-}
-```
-
-`AGENT_NAME` is what the phone shows on each request, so give every agent its own (`claude-code`, `cursor`, `codex`). Optionally add `AGENT_ICON`: one of `code`, `terminal`, `sparkles`, `chat`, `search`, `globe`, `flash`, `cube`, or a single emoji. Anything else (a web address, plain text) is ignored; the agent chooses its own label, so the phone treats it as a claim, not as proof of who is asking. Without them the request shows as "Unnamed agent" with a laptop icon.
-
-**Pause everything.** The switch at the top of the app's inbox makes the relay refuse every new request from your paired laptops with `423`. Each agent is told "paused all approvals … do not retry" instead of hanging or guessing, and `node agent/request.js` exits with code 3. Requests already waiting stay answerable. It lasts until you switch it off, including across a relay restart, and the switch only shows what the relay has confirmed: if a laptop cannot be reached, the app says so and offers to try again.
-
-**Daily limit and auto-approve.** In Settings, set a limit in SOL and switch on "Auto-approve small payments". Then a request skips Nod's card only if all of this is true, and otherwise it asks as usual:
-
-- it is a plain SOL transfer (one instruction, the System Program, one signer, nothing else in the transaction);
-- the recipient is an address you approved by hand before with no warning showing, and the payment went through (approving "Send anyway" over a warning teaches nothing);
-- the simulation succeeded and shows no warning, and the money that leaves the wallet is the transfer plus at most its fee;
-- it fits in what is left of today's limit. Every payment through Nod counts, approved by hand or automatically, with its network fee included (a payment that was signed but may not have landed counts in full, one that failed on chain counts only its fee). Today ends at local midnight;
-- "Pause everything" is off (and no pause is still on its way), and Nod is open on screen.
-
-The wallet still signs. Nod cannot tell in advance whether your wallet will show its own prompt; most do, so auto-approve skips Nod's card, not the wallet's. If the wallet cannot sign without you (login expired, prompt declined), nothing is sent and the normal card appears with a note. Auto-approved payments are marked "Auto-approved" in the inbox and on the result screen. The limit, the trusted addresses and the spending record live only on the phone, and an address can be forgotten in Settings.
-
-Then ask it: "send 0.001 SOL to <ADDRESS> on devnet". Tools: `get_wallet_address`, `request_transfer`, `request_transaction`.
-
-## What the tests found that matters for the real build
-
-- **One phone per relay.** With two phones connected, both saw the same request and both signed it, so the money moved twice. The relay now keeps only the newest phone connection. Pairing now fixes this: a second phone cannot join an existing pairing.
-- **Withdraw on timeout.** If the agent stops waiting, the request is cancelled so the phone cannot approve it afterwards with nobody listening.
-- **The agent's note cannot be trusted.** The screen shows the simulated balance change, not the agent's description. A request labelled "tiny test payment" that sends 0.9 SOL shows as 0.9 SOL.
-- **Blockhash refresh works only when the wallet is the sole signer.** Multi-signer transactions are passed through unchanged and must be approved before they expire.
-- **Release builds block plain HTTP.** `mobile/app.json` turns it back on for the spike so the app can reach `http://localhost:8787`. The real relay must be HTTPS and this setting removed.
-
-## Not verified, please check on the device
-
-- **The fee in the preview.** In LiteSVM the simulated balance already includes the network fee, so the screen says "(network fee included)". Real devnet should behave the same, but that is Test 5's job to confirm.
-- **`signAndSendTransaction` with the mock wallet.** Written against the library's type definitions, never executed.
-- **The template's crypto polyfill.** npm flags `react-native-quick-crypto@0.7.17` (pinned by the official template) with a security advisory and recommends 1.0 or newer. Fine for the spike; upgrade before a real release.
-
-## Security limits of this spike
-
-- Pairing: each laptop and phone get their own secret, stored on the relay only as a hash. Anyone without a pairing is refused, and one pairing cannot see another's requests. A relay on a public address refuses to start without `RELAY_REGISTRATION_KEY`, accepts only HTTPS, and saves pairings (hashes), push tokens and pending requests to disk so a restart does not unpair the phone. See `docs/hosting.md` to deploy it. The local relay (`npm run relay`) still speaks plain HTTP on localhost; never expose it as it is.
-- The Android release build no longer allows plain `http://` and the app refuses to pair with a non-HTTPS relay. For a local test of a release build, put an HTTPS tunnel in front of the relay (see `docs/hosting.md`); debug builds still accept a local `http://` relay.
-- The pairing code in the QR is a one-time password, so do not photograph it or share it.
-- A laptop whose pairing is revoked while offline learns about it on its next call. The phone treats a refused key as revoked and drops it.
-- `sim/.test-wallet.json` is a throwaway key for devnet or the local stand-in. Never fund it with real SOL.
-- The Mock MWA Wallet is a testing wallet. Never use it with real funds.
-
-## Layout
+## How it fits together
 
 ```
-shared/     approval logic: validate, build, refresh blockhash, summarise, preview, report
-relay/      the relay server (HTTP + WebSocket, in memory)
-agent/      client.js (library), request.js (CLI), mcp-server.js (MCP tools)
+ AI agent ──MCP──▶ Nod MCP server ──HTTPS──▶ relay ──WebSocket / push──▶ Nod app (phone)
+ (Claude Code,      agent/mcp-server.js      relay/server.js                  │
+  Cursor, Codex…)                                                            │ shows the simulated result,
+                                                                             │ you nod
+                                                                             ▼
+                                              Solana (devnet) ◀── signs ── mobile wallet (Mobile Wallet Adapter)
+```
+
+1. The agent asks (by MCP tool, or `agent/request.js`) for a transfer or a finished transaction. It can only ask.
+2. The relay holds the request until the phone answers. It only passes messages along.
+3. The phone simulates the transaction against Solana and shows the balance change that would really happen, plus warnings.
+4. You approve. The phone hands the transaction to your wallet through the Mobile Wallet Adapter and the wallet signs. The phone sends it, and the signature goes back to the agent.
+
+The approval logic lives once, in `shared/`, and is mirrored into the app.
+
+## Security model, in plain words
+
+- **The agent never holds your keys.** Your keys stay in your wallet. The agent can only send a request; it cannot approve it.
+- **The preview shows what would really happen.** The phone simulates the transaction and shows the result. The agent's note is only a claim, shown as a claim. A request labelled "tiny test payment" that moves 0.9 SOL shows as 0.9 SOL.
+- **One phone per pairing.** A pairing is made with a one-time code, and a second phone cannot join it. One pairing cannot see another's requests.
+- **Keys are stored hashed.** The relay keeps only SHA-256 hashes of the agent's and phone's keys. A hosted relay refuses to start without a registration key and accepts only HTTPS.
+- **Pause everything.** One switch in the app makes the relay refuse every new request, and agents are told so rather than left hanging.
+- **Daily limit.** You set a limit in SOL. It counts every payment through Nod, with network fees, and resets at local midnight.
+- **Auto-approve is narrow.** A request skips Nod's card only if it is a plain SOL transfer to an address you approved by hand before, its simulation is clean, it fits in what is left of today's limit, nothing is paused, and Nod is open on screen. Anything else asks as usual. The limit, trusted addresses and spending record never leave the phone.
+- **Stale transactions are refreshed.** If you are slow to approve, the blockhash is refreshed when the wallet is the only signer. Otherwise the transaction is passed through unchanged.
+- **Withdraw on timeout.** If the agent stops waiting, its request is cancelled so it cannot be approved later with nobody listening.
+
+## Honest limits
+
+- **Devnet only.** Do not use real funds. The app and relay are not audited.
+- **The wallet still asks for its own signature.** Auto-approve skips Nod's card, not the wallet's prompt, and Nod cannot know in advance whether your wallet will show one. If the wallet cannot sign without you, nothing is sent and the normal card appears.
+- **Push notifications need Firebase set up.** The relay can push, but you must supply your own Firebase and Expo credentials. Without them requests still arrive over the app's WebSocket while Nod is open, but the phone is not woken for new ones.
+- **Release builds need an HTTPS relay**, so running the APK against your own laptop needs a tunnel or a hosted relay.
+- **Android only.** There is no iOS app. The APK is signed with the author's release key; a debug-signed build from this repo will not match the key published on the site.
+- **Preview checked against devnet only.** Blockhash refresh only works when the wallet is the sole signer. The template's `react-native-quick-crypto` 0.7.17 has an open npm advisory and should be upgraded before real use.
+- **Not tried on every phone and wallet.** The loop has been run end to end on a real phone with Solflare. Other wallets and Android versions are untested.
+
+## Repo layout
+
+```
+shared/     approval logic: validate, build, refresh blockhash, simulate, summarise, auto-approve
+relay/      the relay server (HTTP + WebSocket)
+agent/      client.js (library), request.js (CLI), mcp-server.js (MCP tools), pair.js
 sim/        phone.js (terminal phone), local-rpc.js (offline Solana), demo.js
-test/       end-to-end tests
-mobile/     the Expo app: official Solana Mobile template + features/approvals
-scripts/    sync-shared.js copies shared/ into mobile/features/approvals/lib
+test/       end-to-end and unit tests
+mobile/     the Expo app (Solana Mobile template + features/approvals)
+site/       the one-page website and its assetlinks.json
+deploy/     Fly.io config and the one-script VPS installer
+docs/       agent guides, hosting, release, design reference, history of the first spike
+scripts/    sync, release helpers, demo:video
 ```
 
 Edit approval logic in `shared/`, then run `npm run sync`. `npm test` fails if the app's copy is out of date.
 
-## Report back
+More: [docs/hosting.md](docs/hosting.md) · [docs/release.md](docs/release.md) · [docs/history/](docs/history/) (the first feasibility spike, not maintained).
 
-| Test | Pass / fail | Time taken | Notes |
-|---|---|---|---|
-| 1 App opens on the device | | | |
-| 2 Wallet signs on devnet | | | |
-| 3 Remote request loop on the device | | | |
-| 4 Stale blockhash on the device | | | |
-| 5 Preview matches on devnet | | | |
-| 6 Push | | | |
-| 7 Signed APK, Test 3 repeated | | | |
-| 8 Real agent | | | |
-| 9 Delegation program on mainnet | | | |
+## License
+
+[MIT](LICENSE)
