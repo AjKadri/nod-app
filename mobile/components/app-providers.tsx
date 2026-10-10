@@ -1,7 +1,7 @@
 import { PropsWithChildren } from 'react'
 import { MobileWalletProvider } from '@wallet-ui/react-native-web3js'
 import { ThemeProvider } from '@/components/theme-provider'
-import { AppConfig } from '@/constants/app-config'
+import { WALLET_IDENTITY } from '@/constants/app-config'
 import { ApprovalsProvider } from '@/features/approvals/approvals-provider'
 import { PushProvider } from '@/features/push/push-provider'
 import { PairingProvider } from '@/features/pairing/pairing-provider'
@@ -29,7 +29,7 @@ export function AppProviders({ children }: PropsWithChildren) {
 function SolanaNetworkProvider({ children }: PropsWithChildren) {
   const { selectedNetwork } = useNetwork()
   return (
-    <MobileWalletProvider chain={selectedNetwork.id} endpoint={selectedNetwork.url} identity={{ name: AppConfig.name }}>
+    <MobileWalletProvider chain={selectedNetwork.id} endpoint={selectedNetwork.url} identity={WALLET_IDENTITY}>
       {children}
     </MobileWalletProvider>
   )
