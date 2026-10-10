@@ -22,9 +22,9 @@ Still in the `nod-app` folder:
 openclaw mcp add nod --command node --arg "$PWD/agent/mcp-server.js" --env AGENT_NAME=openclaw --env AGENT_ICON=globe
 ```
 
-OpenClaw checks the server before saving it. Confirm with `openclaw mcp probe nod`, which should list the three tools. (The flags follow [OpenClaw's MCP docs](https://docs.openclaw.ai/cli/mcp/registry); if your version words them differently, `openclaw mcp add --help` is the authority. The entry is stored under `mcp.servers.nod` in OpenClaw's config.)
+OpenClaw checks the server before saving it. Confirm with `openclaw mcp probe nod`, which should list the four tools. (The flags follow [OpenClaw's MCP docs](https://docs.openclaw.ai/cli/mcp/registry); if your version words them differently, `openclaw mcp add --help` is the authority. The entry is stored under `mcp.servers.nod` in OpenClaw's config.)
 
-`AGENT_NAME` is what the phone shows on each request; `AGENT_ICON` is optional (`code`, `terminal`, `sparkles`, `chat`, `search`, `globe`, `flash`, `cube`, or one emoji). Tools: `get_wallet_address`, `request_transfer`, `request_transaction`.
+`AGENT_NAME` is what the phone shows on each request; `AGENT_ICON` is optional (`code`, `terminal`, `sparkles`, `chat`, `search`, `globe`, `flash`, `cube`, or one emoji). Tools: `get_wallet_address`, `request_transfer`, `request_token_transfer` (SPL and Token-2022 tokens such as SKR) and `request_transaction`. Add `NETWORK=mainnet` to the server's environment to ask for Mainnet (real money); the default is Devnet, and a phone on the other network refuses the request.
 
 ## 3. Try it
 
