@@ -2,6 +2,28 @@
 
 **Your agent asks. You nod.** An AI agent asks for a Solana transaction, your phone shows what it would really do, you nod, and your mobile wallet signs. The agent never holds your key.
 
+## For judges: two ways to try Nod
+
+**1. Fastest, no PC needed.** Install the APK from https://nod.ajkadri.dev/nod.apk, open Nod and tap **Try demo**. You get the approval card, the risky-transaction warning and the auto-approve rules without a wallet.
+
+**2. Full loop, self-hosted.** You need Node 20 or newer, and Solflare set to devnet on the phone.
+
+```
+git clone https://github.com/AjKadri/nod-app.git nod
+cd nod
+npm install
+npm run relay
+```
+
+Release builds only pair over HTTPS, and `npm run relay` listens on localhost, so put an HTTPS tunnel in front of it, for example `cloudflared tunnel --url http://localhost:8787`. Then pair the phone and send a devnet request with the demo script:
+
+```
+npm run pair -- --relay https://<your-tunnel-address>
+NOD_DEMO_RECIPIENT=<DEVNET_ADDRESS> npm run demo:video
+```
+
+Details: [With the real phone app](#with-the-real-phone-app), [Replay the demo video](#replay-the-demo-video) and [docs/hosting.md](docs/hosting.md).
+
 - Demo video: *link coming soon*
 - Deck: *link coming soon*
 - Site and APK: https://nod.ajkadri.dev
