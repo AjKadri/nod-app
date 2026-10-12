@@ -37,8 +37,8 @@ Built for the Solana Mobile CLOCK IN hackathon. Android, Solana devnet, MIT lice
 
 - **Tested on:** an Android 11 phone with Solflare on devnet, using the release APK from https://nod.ajkadri.dev (checksum in `/SHA256SUMS`).
 - **Real devnet transactions from the demo:**
-  - Normal approval, step a: https://explorer.solana.com/tx/<SIGNATURE_A>?cluster=devnet
-  - Auto-approved payment, step c: https://explorer.solana.com/tx/<SIGNATURE_C>?cluster=devnet
+  - Normal approval, step a: https://explorer.solana.com/tx/51w8Koe6uhzXN1wEvxe4fXRkmX7aKJ34i4Nf9JbqkjLGQ3HhYxDKNoqmGtX4x2Ffu9L4XYPxuH38C27uUwXFv4ax?cluster=devnet
+  - Auto-approved payment, step c: https://explorer.solana.com/tx/4idqPo5amdzrhdy8qD6ZpZLC3HQD49nfkYfMRKqk3756nDUjgZpADPCD9ueSiJMUpw9q2WXHnYrgNM22ck6H6WDR?cluster=devnet
 - **What the video shows:** a real approval at 0:14, the transaction on the explorer at 0:42, a risky request rejected at 0:52, "Pause everything" at 1:21, and auto-approve with a daily limit at 1:35.
 - **Tests:** 196 tests cover pairing, the relay, the approval card, the auto-approve rules, the agent and the release scripts. Run `npm test`.
 
@@ -59,14 +59,11 @@ It never auto-approves a new address, a request with any warning, a failed simul
 
 ## Security status
 
-- **Not audited.** The app and relay have had no external security audit.
-- **Dependencies, from `npm audit` on the lockfiles:**
-  - Relay, agent and scripts: 5 moderate advisories, none high or critical. These include `uuid` and `stream-json`, both transitive.
-  - Mobile app: 43 advisories, 22 high and 21 moderate, none critical. These include `decode-uri-component`, `uuid`, `stream-json`, and direct packages such as `expo` and `react-native`.
-  - I have not checked whether any of these can be reached with user-controlled input. Upgrading them is planned before Mainnet.
-- **Planned before Mainnet:** pin the GitHub Actions (now version tags such as `actions/checkout@v4`) to commit SHAs, and pin the relay's Docker base image (now `node:22-alpine`) to a digest.
+- **No external audit yet.** An automated security scan of commit 91be52a found no confirmed defects in Nod's own code. An independent audit is planned before Mainnet.
+- **Dependencies.** `npm audit` reports advisories in third-party packages, mostly inside Expo and React Native's build tooling and in transitive packages such as `uuid`, `stream-json` and `decode-uri-component`. We'll upgrade them and re-run the audit before Mainnet; we haven't changed them now so the tested release APK stays identical to this code.
+- **Supply chain, planned before Mainnet:** pin GitHub Actions to commit SHAs and the relay's Docker base image to a digest.
 - **Relay container:** the entrypoint runs as root only to fix ownership of the data volume, then drops to the unprivileged `node` user with `su-exec` (`deploy/entrypoint.sh`).
-- **Devnet only.** The agent never holds your wallet key; the phone's wallet signs each approved request.
+- **Devnet only.** The agent and the relay never hold your wallet key; your wallet signs every approved request.
 
 ## Try it in 60 seconds
 
