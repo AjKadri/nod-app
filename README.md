@@ -33,6 +33,41 @@ Details: [With the real phone app](#with-the-real-phone-app), [Replay the demo v
 
 Built for the Solana Mobile CLOCK IN hackathon. Android, Solana devnet, MIT licensed.
 
+## Proof it runs on a real phone
+
+- **Tested on:** an Android 11 phone with Solflare on devnet, using the release APK from https://nod.ajkadri.dev (checksum in `/SHA256SUMS`).
+- **Real devnet transactions from the demo:**
+  - Normal approval, step a: https://explorer.solana.com/tx/<SIGNATURE_A>?cluster=devnet
+  - Auto-approved payment, step c: https://explorer.solana.com/tx/<SIGNATURE_C>?cluster=devnet
+- **What the video shows:** a real approval at 0:14, the transaction on the explorer at 0:42, a risky request rejected at 0:52, "Pause everything" at 1:21, and auto-approve with a daily limit at 1:35.
+- **Tests:** 196 tests cover pairing, the relay, the approval card, the auto-approve rules, the agent and the release scripts. Run `npm test`.
+
+## When auto-approve can happen
+
+Nod skips the card only when every one of these holds (`shared/autoapprove.js`):
+
+- You switched auto-approve on and set a daily limit.
+- "Pause everything" is off.
+- Nod is open on the screen.
+- The simulation succeeded and shows no warning.
+- It is a plain SOL transfer: one instruction, to the System Program, one transfer out of your wallet, one signer, no lookup tables.
+- What leaves the wallet is the transfer plus at most the network fee.
+- The recipient is an address you approved by hand before.
+- The amount fits in what is left of today's limit. Today ends at local midnight, and fees count toward the limit.
+
+It never auto-approves a new address, a request with any warning, a failed simulation, any other kind of transaction, or anything over the limit. The wallet still signs every time. An address is learned only after a payment to it goes through, approved by hand with no warning; approving "Send anyway" over a warning does not teach it. Auto-approved payments show as "Auto-approved" in the inbox history.
+
+## Security status
+
+- **Not audited.** The app and relay have had no external security audit.
+- **Dependencies, from `npm audit` on the lockfiles:**
+  - Relay, agent and scripts: 5 moderate advisories, none high or critical. These include `uuid` and `stream-json`, both transitive.
+  - Mobile app: 43 advisories, 22 high and 21 moderate, none critical. These include `decode-uri-component`, `uuid`, `stream-json`, and direct packages such as `expo` and `react-native`.
+  - I have not checked whether any of these can be reached with user-controlled input. Upgrading them is planned before Mainnet.
+- **Planned before Mainnet:** pin the GitHub Actions (now version tags such as `actions/checkout@v4`) to commit SHAs, and pin the relay's Docker base image (now `node:22-alpine`) to a digest.
+- **Relay container:** the entrypoint runs as root only to fix ownership of the data volume, then drops to the unprivileged `node` user with `su-exec` (`deploy/entrypoint.sh`).
+- **Devnet only.** The agent never holds your wallet key; the phone's wallet signs each approved request.
+
 ## Try it in 60 seconds
 
 No wallet, no laptop, no setup.
