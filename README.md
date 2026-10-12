@@ -1,5 +1,7 @@
 # Nod
 
+▶ Watch the 2-minute demo: <https://www.youtube.com/watch?v=oIHKND8kFog>
+
 **Your agent asks. You nod.** An AI agent asks for a Solana transaction, your phone shows what it would really do, you nod, and your mobile wallet signs. The agent never holds your key.
 
 ## For judges: two ways to try Nod
