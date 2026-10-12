@@ -26,8 +26,8 @@ NOD_DEMO_RECIPIENT=<DEVNET_ADDRESS> npm run demo:video
 
 Details: [With the real phone app](#with-the-real-phone-app), [Replay the demo video](#replay-the-demo-video) and [docs/hosting.md](docs/hosting.md).
 
-- Demo video: *link coming soon*
-- Deck: *link coming soon*
+- Demo video: <https://www.youtube.com/watch?v=oIHKND8kFog>
+- Deck: <https://drive.google.com/file/d/1wSnLbikAzjDYUk5w7FtmA5-nbWdloXKD/view?usp=sharing>
 - Site and APK: https://nod.ajkadri.dev
 - X: https://x.com/nod_app
 
